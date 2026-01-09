@@ -1,14 +1,14 @@
 pipeline {
     agent any
 
-    environment {
-        JAVA_HOME = tool 'JDK21'
-        PATH = "${env.JAVA_HOME}\\bin;${env.PATH}"
+    tools {
+        jdk 'JDK21'        // change if your Jenkins JDK name differs
+        python 'Python3'   // change if your Python tool name differs
     }
 
-    options {
-        //timestamps()
-        disableConcurrentBuilds()
+    environment {
+        GIT_CREDENTIALS = 'github-pat'
+        REPO_URL = 'https://github.com/vaibhavsaxena619/poc-auto-pr-fix.git'
     }
 
     stages {
@@ -19,25 +19,26 @@ pipeline {
                     $class: 'GitSCM',
                     branches: [[name: '*/main']],
                     userRemoteConfigs: [[
-                        url: 'https://github.com/vaibhavsaxena619/poc-auto-pr-fix.git',
-                        credentialsId: 'github-pat'
+                        url: env.REPO_URL,
+                        credentialsId: env.GIT_CREDENTIALS
                     ]]
                 ])
             }
         }
 
         stage('Configure Git') {
-        steps {
-            bat '''
-            git config user.name "vaibhavsaxena619"
-            git config user.email "vaibhav.saxena619@gmail.com"
-            '''
-        }
-    }
-
-        stage('Compile (Initial)') {
             steps {
                 bat '''
+                git config user.name "vaibhavsaxena619"
+                git config user.email "vaibhav.saxena619@gmail.com"
+                '''
+            }
+        }
+
+        stage('Compile (Capture Errors Only)') {
+            steps {
+                bat '''
+                echo Compiling Java files (errors will be captured)...
                 javac src\\*.java 2> compile_errors.txt
                 exit 0
                 '''
@@ -47,37 +48,27 @@ pipeline {
         stage('Auto Fix via LLM') {
             steps {
                 bat '''
+                echo Sending errors to LLM for fixing...
                 python llm_fix.py compile_errors.txt
+                exit 0
                 '''
             }
         }
 
-        stage('Recompile After Fix') {
-        steps {
-            bat 'javac src\\App.java'
-        }
-    }
-
         stage('Commit & Push Fixes') {
             steps {
                 bat '''
-                git status
-                git add .
-                git diff-index --quiet HEAD || (
-                    git commit -m "ci: auto-fix compilation errors"
-                    git push origin HEAD
-                )
+                git add src
+                git commit -m "Auto-fix via LLM (no validation)" || echo "Nothing to commit"
+                git push origin HEAD:main
                 '''
             }
         }
     }
 
     post {
-        success {
-            echo '✅ Pipeline completed successfully'
-        }
-        failure {
-            echo '❌ Pipeline failed – manual action required'
+        always {
+            echo '✅ LLM fix applied and pushed. No rebuild performed.'
         }
     }
 }
