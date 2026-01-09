@@ -1,7 +1,14 @@
 pipeline {
     agent any
 
+    environment {
+        JAVA_HOME = tool 'JDK17'        // Adjust to your Java installation name in Jenkins
+        PATH = "${env.JAVA_HOME}\\bin;${env.PATH}"
+        LLM_ENDPOINT = "http://localhost:11434/api/generate"
+    }
+
     options {
+        timestamps()
         disableConcurrentBuilds()
     }
 
@@ -16,52 +23,47 @@ pipeline {
         stage('Compile') {
             steps {
                 script {
-                    try {
-                        bat 'javac src\\*.java'
-                    } catch (e) {
-                        echo 'Compilation failed'
-                        currentBuild.result = 'UNSTABLE'
-                    }
+                    // Run javac and capture errors to file
+                    bat '''
+                    setlocal enabledelayedexpansion
+                    javac src\\*.java 2> compile_errors.txt
+                    if errorlevel 1 (
+                        echo Compilation failed
+                        exit 0
+                    )
+                    '''
                 }
             }
         }
 
-        stage('Capture Errors') {
-            when {
-                expression { currentBuild.result == 'UNSTABLE' }
-            }
-            steps {
-                bat 'javac src\\*.java 2> compile_errors.txt'
-            }
-        }
-
         stage('Auto Fix via LLM') {
-            when {
-                expression { currentBuild.result == 'UNSTABLE' }
-            }
             steps {
+                // Call Python script to fix errors
                 bat 'python llm_fix.py compile_errors.txt'
             }
         }
 
         stage('Recompile After Fix') {
-            when {
-                expression { currentBuild.result == 'UNSTABLE' }
-            }
             steps {
-                bat 'javac *.java'
+                bat '''
+                javac src\\*.java
+                if errorlevel 1 (
+                    echo Compilation still has errors
+                    exit 1
+                )
+                '''
             }
         }
 
         stage('Commit & Push Fixes') {
-            when {
-                expression { currentBuild.result == 'UNSTABLE' }
-            }
             steps {
                 bat '''
+                git status
                 git add .
-                git commit -m "ci: auto-fix compilation errors"
-                git push origin HEAD
+                git diff-index --quiet HEAD || (
+                    git commit -m "ci: auto-fix compilation errors"
+                    git push origin HEAD
+                )
                 '''
             }
         }
@@ -69,13 +71,13 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline completed successfully'
+            echo 'Pipeline completed successfully!'
         }
         failure {
-            echo 'Pipeline failed – manual action required'
+            echo 'Pipeline failed – manual action required.'
         }
         unstable {
-            echo 'Auto-fix applied'
+            echo 'Auto-fix applied, check changes.'
         }
     }
 }

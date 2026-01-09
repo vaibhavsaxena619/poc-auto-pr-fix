@@ -2,36 +2,41 @@ import sys
 import requests
 from pathlib import Path
 
-errors = Path(sys.argv[1]).read_text()
+# Read compiler errors
+errors_file = Path(sys.argv[1])
+errors = errors_file.read_text()
 
-for file in Path(".").glob("*.java"):
-    code = file.read_text()
+# Process all Java files in src/
+for java_file in Path("src").glob("*.java"):
+    code = java_file.read_text()
 
     prompt = f"""
-Fix Java compilation errors only.
-Do NOT change logic.
-Do NOT add features.
+You are a Java compiler assistant.
+Fix ONLY compilation errors.
+DO NOT change the existing logic or add new features.
+Return the full corrected Java file.
 
 Java Code:
 {code}
 
 Compiler Errors:
 {errors}
-
-Return FULL corrected file only.
 """
 
     response = requests.post(
         "http://localhost:11434/api/generate",
         json={
-            "model": "codellama",
+            "model": "codellama",   # Or your local LLM
             "prompt": prompt,
             "stream": False
         }
     )
 
-    fixed = response.json()["response"]
+    fixed_code = response.json()["response"]
 
-    # Safety guard
-    if "import" in fixed and len(fixed) < len(code) * 1.2:
-        file.write_text(fixed)
+    # Safety check: only apply if basic checks pass
+    if "class" in fixed_code and len(fixed_code) < len(code) * 1.2:
+        java_file.write_text(fixed_code)
+        print(f"Applied fixes to {java_file}")
+    else:
+        print(f"Fix for {java_file} rejected due to safety check")
