@@ -21,9 +21,6 @@ You are fixing Java compilation errors.
 
 Rules:
 - Fix ONLY compilation errors
-- You MAY remove code if required
-- You MAY rewrite the file
-- DO NOT add imports
 - Return ONLY valid Java code
 - No explanations
 
