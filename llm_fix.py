@@ -3,11 +3,10 @@ import json
 import urllib.request
 from pathlib import Path
 
-errors_file = Path(sys.argv[1])
-errors = errors_file.read_text()
+errors = Path(sys.argv[1]).read_text()
 
-LLM_URL = "http://localhost:11434/api/generate"
-MODEL = "codellama"
+LLM_URL = "http://127.0.0.1:11434/api/generate"
+MODEL = "deepseek-coder"
 
 for java_file in Path("src").glob("*.java"):
     original_code = java_file.read_text()
@@ -17,9 +16,10 @@ You are a Java compiler assistant.
 
 Rules:
 - Fix ONLY compilation errors
-- DO NOT add new logic or features
-- ONLY add imports, fix syntax, or method signatures
-- Return the FULL corrected Java file
+- DO NOT change logic
+- Prefer adding missing imports
+- If possible, return ONLY the import statements
+- Otherwise return the FULL corrected Java file
 - No explanations
 
 Java Code:
@@ -45,12 +45,19 @@ Compiler Errors:
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             response = json.loads(resp.read().decode("utf-8"))
-            fixed_code = response.get("response", "")
+            fix = response.get("response", "").strip()
 
-            # Safety guard
-            if "class" in fixed_code and len(fixed_code) <= len(original_code) * 1.2:
-                java_file.write_text(fixed_code)
-                print(f"Applied fixes to {java_file.name}")
+            # CASE 1: Import-only fix (SAFE)
+            if fix.startswith("import ") and "class" in original_code:
+                updated = fix + "\n\n" + original_code
+                java_file.write_text(updated)
+                print(f"Applied import-only fix to {java_file.name}")
+
+            # CASE 2: Full-file fix (SAFE)
+            elif "class" in fix and len(fix) <= len(original_code) * 1.3:
+                java_file.write_text(fix)
+                print(f"Applied full fix to {java_file.name}")
+
             else:
                 print(f"Rejected unsafe fix for {java_file.name}")
 
