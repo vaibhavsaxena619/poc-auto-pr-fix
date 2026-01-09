@@ -2,30 +2,35 @@ import sys
 import json
 import urllib.request
 from pathlib import Path
+import re
 
 errors = Path(sys.argv[1]).read_text()
 
 LLM_URL = "http://127.0.0.1:11434/api/generate"
-MODEL = "deepseek-coder"
+MODEL = "codellama"
+
+def clean(text):
+    text = re.sub(r"```[a-zA-Z]*", "", text)
+    return text.replace("```", "").strip()
 
 for java_file in Path("src").glob("*.java"):
-    original_code = java_file.read_text()
+    original = java_file.read_text()
 
     prompt = f"""
-You are a Java compiler assistant.
+You are fixing Java compilation errors.
 
 Rules:
 - Fix ONLY compilation errors
-- DO NOT change logic
-- Prefer adding missing imports
-- If possible, return ONLY the import statements
-- Otherwise return the FULL corrected Java file
+- You MAY remove code if required
+- You MAY rewrite the file
+- DO NOT add imports
+- Return ONLY valid Java code
 - No explanations
 
-Java Code:
-{original_code}
+Java code:
+{original}
 
-Compiler Errors:
+Compiler errors:
 {errors}
 """
 
@@ -33,7 +38,7 @@ Compiler Errors:
         "model": MODEL,
         "prompt": prompt,
         "stream": False
-    }).encode("utf-8")
+    }).encode()
 
     req = urllib.request.Request(
         LLM_URL,
@@ -44,22 +49,15 @@ Compiler Errors:
 
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            response = json.loads(resp.read().decode("utf-8"))
-            fix = response.get("response", "").strip()
+            response = json.loads(resp.read().decode())
+            fixed_code = clean(response.get("response", ""))
 
-            # CASE 1: Import-only fix (SAFE)
-            if fix.startswith("import ") and "class" in original_code:
-                updated = fix + "\n\n" + original_code
-                java_file.write_text(updated)
-                print(f"Applied import-only fix to {java_file.name}")
+            if not fixed_code:
+                print("LLM returned empty response")
+                sys.exit(1)
 
-            # CASE 2: Full-file fix (SAFE)
-            elif "class" in fix and len(fix) <= len(original_code) * 1.3:
-                java_file.write_text(fix)
-                print(f"Applied full fix to {java_file.name}")
-
-            else:
-                print(f"Rejected unsafe fix for {java_file.name}")
+            java_file.write_text(fixed_code)
+            print(f"Overwrote {java_file.name} with LLM output")
 
     except Exception as e:
         print(f"LLM call failed: {e}")
