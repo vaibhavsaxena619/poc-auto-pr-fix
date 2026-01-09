@@ -12,9 +12,10 @@ prompt = f"""
 Fix the Java compilation errors below.
 
 STRICT RULES:
-- Output ONLY valid Java code
-- No explanations
+- Output ONLY Java code
 - No markdown
+- No backticks
+- No explanations
 - No comments
 - No imports
 - Single public class App
@@ -43,16 +44,22 @@ except Exception as e:
     print("LLM call failed:", e)
     sys.exit(1)
 
-# 🔥 HARD SANITIZATION
-match = re.search(r"(public\s+class\s+App[\s\S]*)", raw)
+# 🔥 HARD SANITIZATION PIPELINE
+
+# 1. Remove markdown fences if present
+raw = raw.replace("```java", "").replace("```", "").strip()
+
+# 2. Extract only the App class
+match = re.search(r"(public\s+class\s+App[\s\S]*\})", raw)
 
 if not match:
-    print("Invalid LLM output – no public class App found")
+    print("Invalid LLM output – no valid App class found")
     sys.exit(1)
 
 java_code = match.group(1)
 
+# 3. Write clean Java
 with open("src/App.java", "w", encoding="utf-8") as f:
     f.write(java_code)
 
-print("App.java overwritten with sanitized Java code")
+print("App.java overwritten with clean Java code")
