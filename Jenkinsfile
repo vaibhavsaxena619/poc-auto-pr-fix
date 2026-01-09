@@ -17,7 +17,7 @@ pipeline {
             steps {
                 script {
                     try {
-                        bat 'javac *.java'
+                        bat 'javac src\\*.java'
                     } catch (e) {
                         echo 'Compilation failed'
                         currentBuild.result = 'UNSTABLE'
@@ -31,7 +31,7 @@ pipeline {
                 expression { currentBuild.result == 'UNSTABLE' }
             }
             steps {
-                bat 'javac *.java 2> compile_errors.txt'
+                bat 'javac src\\*.java 2> compile_errors.txt'
             }
         }
 
