@@ -17,7 +17,6 @@ STRICT RULES:
 - No backticks
 - No explanations
 - No comments
-- No imports
 - Single public class App
 - Must compile with: javac App.java
 
