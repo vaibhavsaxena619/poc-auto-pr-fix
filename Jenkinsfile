@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        JAVA_HOME = tool 'JDK17'        // Adjust to your Java installation name in Jenkins
+        JAVA_HOME = tool 'JDK21'        // Adjust to your Java installation name in Jenkins
         PATH = "${env.JAVA_HOME}\\bin;${env.PATH}"
         LLM_ENDPOINT = "http://localhost:11434/api/generate"
     }
