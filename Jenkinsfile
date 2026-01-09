@@ -15,9 +15,25 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                checkout scm
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/vaibhavsaxena619/poc-auto-pr-fix.git',
+                        credentialsId: 'github-pat'
+                    ]]
+                ])
             }
         }
+
+        stage('Configure Git') {
+        steps {
+            bat '''
+            git config user.name "vaibhavsaxena619"
+            git config user.email "vaibhav.saxena619@gmail.com"
+            '''
+        }
+    }
 
         stage('Compile (Initial)') {
             steps {
