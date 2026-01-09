@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     environment {
-        // Optional: Python virtual environment folder
         VENV_DIR = 'venv'
     }
 
@@ -10,38 +9,32 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                // Checkout your repo
                 git url: 'https://github.com/vaibhavsaxena619/poc-auto-pr-fix.git', branch: 'main'
             }
         }
 
         stage('Python Version') {
             steps {
-                // Check Python version
-                sh 'python3 --version'
+                bat 'python --version'
             }
         }
 
         stage('Setup Virtual Environment') {
             steps {
-                // Create and activate venv, install requirements
-                sh """
-                    python3 -m venv ${VENV_DIR}
-                    source ${VENV_DIR}/bin/activate
-                    pip install --upgrade pip
-                    if [ -f requirements.txt ]; then
-                        pip install -r requirements.txt
-                    fi
+                bat """
+                    python -m venv %VENV_DIR%
+                    %VENV_DIR%\\Scripts\\pip.exe install --upgrade pip
+                    if exist requirements.txt (
+                        %VENV_DIR%\\Scripts\\pip.exe install -r requirements.txt
+                    )
                 """
             }
         }
 
         stage('Run Python Script') {
             steps {
-                // Run your main Python script inside venv
-                sh """
-                    source ${VENV_DIR}/bin/activate
-                    python my_script.py
+                bat """
+                    %VENV_DIR%\\Scripts\\python.exe my_script.py
                 """
             }
         }
@@ -51,7 +44,7 @@ pipeline {
     post {
         always {
             echo 'Cleaning up virtual environment...'
-            sh "rm -rf ${VENV_DIR}"
+            bat "rmdir /S /Q %VENV_DIR%"
         }
 
         success {
