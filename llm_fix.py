@@ -1,61 +1,51 @@
 import sys
-import json
-import urllib.request
-from pathlib import Path
 import re
+import requests
 
-errors = Path(sys.argv[1]).read_text()
-
-LLM_URL = "http://127.0.0.1:11434/api/generate"
+OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "codellama"
 
-def clean(text):
-    text = re.sub(r"```[a-zA-Z]*", "", text)
-    return text.replace("```", "").strip()
+errors = open(sys.argv[1]).read()
 
-for java_file in Path("src").glob("*.java"):
-    original = java_file.read_text()
+prompt = f"""
+Fix the Java compilation errors below.
 
-    prompt = f"""
-You are fixing Java compilation errors.
-
-Rules:
-- Fix ONLY compilation errors
-- Return ONLY valid Java code
+STRICT RULES:
+- Output ONLY valid Java code
 - No explanations
+- No markdown
+- No comments
+- No imports
+- Single public class App
+- Must compile with: javac App.java
 
-Java code:
-{original}
-
-Compiler errors:
+Compilation errors:
 {errors}
 """
 
-    payload = json.dumps({
+response = requests.post(
+    OLLAMA_URL,
+    json={
         "model": MODEL,
         "prompt": prompt,
         "stream": False
-    }).encode()
+    },
+    timeout=60
+)
 
-    req = urllib.request.Request(
-        LLM_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
+raw = response.json()["response"]
 
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            response = json.loads(resp.read().decode())
-            fixed_code = clean(response.get("response", ""))
+# 🔥 HARD SANITIZATION 🔥
+# Remove anything before 'public class'
+match = re.search(r"(public\s+class\s+App[\s\S]*)", raw)
 
-            if not fixed_code:
-                print("LLM returned empty response")
-                sys.exit(1)
+if not match:
+    print("LLM output invalid, no public class App found")
+    sys.exit(1)
 
-            java_file.write_text(fixed_code)
-            print(f"Overwrote {java_file.name} with LLM output")
+java_code = match.group(1)
 
-    except Exception as e:
-        print(f"LLM call failed: {e}")
-        sys.exit(1)
+with open("src/App.java", "w", encoding="utf-8") as f:
+    f.write(java_code)
+
+print("App.java overwritten with sanitized Java code")

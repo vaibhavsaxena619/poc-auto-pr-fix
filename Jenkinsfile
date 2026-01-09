@@ -53,12 +53,10 @@ pipeline {
         }
 
         stage('Recompile After Fix') {
-            steps {
-                bat '''
-                javac src\\*.java
-                '''
-            }
+        steps {
+            bat 'javac src\\App.java'
         }
+    }
 
         stage('Commit & Push Fixes') {
             steps {
