@@ -1,11 +1,12 @@
 import sys
 import re
-import requests
+import json
+import urllib.request
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "codellama"
 
-errors = open(sys.argv[1]).read()
+errors = open(sys.argv[1], encoding="utf-8").read()
 
 prompt = f"""
 Fix the Java compilation errors below.
@@ -23,24 +24,30 @@ Compilation errors:
 {errors}
 """
 
-response = requests.post(
+payload = json.dumps({
+    "model": MODEL,
+    "prompt": prompt,
+    "stream": False
+}).encode("utf-8")
+
+req = urllib.request.Request(
     OLLAMA_URL,
-    json={
-        "model": MODEL,
-        "prompt": prompt,
-        "stream": False
-    },
-    timeout=60
+    data=payload,
+    headers={"Content-Type": "application/json"}
 )
 
-raw = response.json()["response"]
+try:
+    with urllib.request.urlopen(req, timeout=60) as response:
+        raw = json.loads(response.read().decode("utf-8"))["response"]
+except Exception as e:
+    print("LLM call failed:", e)
+    sys.exit(1)
 
-# 🔥 HARD SANITIZATION 🔥
-# Remove anything before 'public class'
+# 🔥 HARD SANITIZATION
 match = re.search(r"(public\s+class\s+App[\s\S]*)", raw)
 
 if not match:
-    print("LLM output invalid, no public class App found")
+    print("Invalid LLM output – no public class App found")
     sys.exit(1)
 
 java_code = match.group(1)
