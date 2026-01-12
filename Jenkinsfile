@@ -1,58 +1,58 @@
 pipeline {
     agent any
 
-    environment {
-        VENV_DIR = 'venv'
-    }
-
     stages {
 
         stage('Checkout') {
             steps {
-                git url: 'https://github.com/vaibhavsaxena619/poc-auto-pr-fix.git', branch: 'main'
+                checkout scm
             }
         }
 
-        stage('Python Version') {
+        stage('Compile (Initial)') {
             steps {
-                bat 'python --version'
+                script {
+                    bat '''
+                        if not exist build mkdir build
+                        del /Q build\\compile_errors.txt 2>NUL
+
+                        javac src\\App.java 2> build\\compile_errors.txt
+                        exit /B 0
+                    '''
+                }
             }
         }
 
-        stage('Setup Virtual Environment') {
+        stage('Auto-Fix via Ollama') {
+            when {
+                expression {
+                    return fileExists('build\\compile_errors.txt') &&
+                           readFile('build\\compile_errors.txt').trim().length() > 0
+                }
+            }
             steps {
-                bat """
-                    python -m venv %VENV_DIR%
-                    %VENV_DIR%\\Scripts\\pip.exe install --upgrade pip
-                    if exist requirements.txt (
-                        %VENV_DIR%\\Scripts\\pip.exe install -r requirements.txt
-                    )
-                """
+                echo "Compilation failed. Sending errors to Ollama..."
+                bat '''
+                    python llm_fix.py build\\compile_errors.txt
+                '''
             }
         }
 
-        stage('Run Python Script') {
+        stage('Compile (After Fix)') {
             steps {
-                bat """
-                    %VENV_DIR%\\Scripts\\python.exe my_script.py
-                """
+                bat '''
+                    javac src\\App.java
+                '''
             }
         }
-
     }
 
     post {
-        always {
-            echo 'Cleaning up virtual environment...'
-            bat "rmdir /S /Q %VENV_DIR%"
-        }
-
         success {
-            echo 'Python script ran successfully!'
+            echo "✅ Build succeeded (auto-fix applied if needed)"
         }
-
         failure {
-            echo 'Python script failed. Check logs for errors.'
+            echo "❌ Build failed even after Ollama auto-fix"
         }
     }
 }
