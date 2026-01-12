@@ -2,7 +2,6 @@ import sys
 import re
 import json
 import urllib.request
-import urllib.error
 from pathlib import Path
 import difflib
 
@@ -20,39 +19,22 @@ def fail(msg: str):
     sys.exit(1)
 
 
-def read_file(path: Path) -> str:
+def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
-
-
-def read_errors(path: str) -> str:
-    try:
-        return Path(path).read_text(encoding="utf-8", errors="ignore")
-    except Exception as e:
-        fail(f"Failed to read error file: {e}")
 
 
 def call_ollama(errors: str) -> str:
     prompt = f"""
 You are fixing Java compilation errors in a CI pipeline.
 
-MANDATORY RULES (ABSOLUTE):
-- Output ONLY valid Java source code
-- NO markdown, NO backticks
-- NO comments (// or /* */)
-- NO explanations
+STRICT REQUIREMENTS:
+- Output valid Java code only
 - Single public class App
-- Must compile with: javac App.java
+- Fix ALL compilation errors
+- Fix missing imports
+- Fix spelling mistakes
+- Fix incorrect initializations
 - Do NOT change logic or behavior
-- Fix ONLY compilation errors
-
-YOU MUST:
-1. Resolve ALL "cannot find symbol" errors
-2. Add ALL required imports explicitly
-3. Fix spelling mistakes in class, variable, or type names
-4. Fix incorrect initializations
-5. Ensure all types used are fully resolvable
-
-If any collection type is used, ensure java.util imports exist.
 
 Compilation errors:
 {errors}
@@ -74,26 +56,22 @@ Compilation errors:
         headers={"Content-Type": "application/json"}
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data.get("response", "")
-    except Exception as e:
-        fail(f"Ollama call failed: {e}")
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        return data.get("response", "")
 
 
-def sanitize_java(raw: str) -> str:
-    if not raw.strip():
-        fail("Empty LLM output")
+def strip_comments(code: str) -> str:
+    # Remove block comments
+    code = re.sub(r"/\*[\s\S]*?\*/", "", code)
+    # Remove line comments
+    code = re.sub(r"//.*", "", code)
+    return code
 
-    # Strip markdown
+
+def extract_app_class(raw: str) -> str:
     raw = raw.replace("```java", "").replace("```", "").strip()
 
-    # HARD FAIL if comments exist
-    if "//" in raw or "/*" in raw:
-        fail("LLM output contains comments – rejected")
-
-    # Extract ONLY App class
     match = re.search(
         r"(public\s+class\s+App\s*\{[\s\S]*?\n\})",
         raw,
@@ -101,20 +79,27 @@ def sanitize_java(raw: str) -> str:
     )
 
     if not match:
-        fail("No valid public class App found")
+        fail("No valid public class App found in LLM output")
 
-    java_code = match.group(1).strip()
+    return match.group(1)
 
-    # Enforce import safety
-    if "List<" in java_code or "ArrayList<" in java_code:
-        if "import java.util" not in java_code:
-            java_code = "import java.util.*;\n\n" + java_code
 
-    return java_code + "\n"
+def enforce_imports(java_code: str) -> str:
+    needs_util = any(
+        token in java_code for token in [
+            "List<", "ArrayList<", "Map<", "HashMap<",
+            "Set<", "HashSet<"
+        ]
+    )
+
+    if needs_util and "import java.util" not in java_code:
+        java_code = "import java.util.*;\n\n" + java_code
+
+    return java_code
 
 
 def print_diff(before: str, after: str):
-    print("\n[llm-fix] ===== CODE DIFF =====")
+    print("\n[llm-fix] ===== FIXES APPLIED =====")
     for line in difflib.unified_diff(
         before.splitlines(),
         after.splitlines(),
@@ -123,7 +108,7 @@ def print_diff(before: str, after: str):
         lineterm=""
     ):
         print(line)
-    print("[llm-fix] =====================\n")
+    print("[llm-fix] =========================\n")
 
 
 # ---------------- MAIN ----------------
@@ -133,32 +118,40 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         fail("Usage: python llm_fix.py <compile_errors.txt>")
 
-    error_file = sys.argv[1]
+    error_file = Path(sys.argv[1])
 
-    if not Path(error_file).exists():
+    if not error_file.exists():
         fail("Compile error file not found")
 
     if not JAVA_FILE.exists():
         fail("src/App.java not found")
 
     print("[llm-fix] Reading compilation errors...")
-    errors = read_errors(error_file)
+    errors = read_text(error_file)
 
     if not errors.strip():
-        print("[llm-fix] No errors detected, skipping")
+        print("[llm-fix] No errors found — skipping")
         sys.exit(0)
 
-    original_code = read_file(JAVA_FILE)
+    original_code = read_text(JAVA_FILE)
 
     print("[llm-fix] Sending errors to DeepSeek-Coder...")
-    raw_response = call_ollama(errors)
+    raw = call_ollama(errors)
 
-    print("[llm-fix] Sanitizing LLM output...")
-    fixed_code = sanitize_java(raw_response)
+    print("[llm-fix] Extracting App class...")
+    java_code = extract_app_class(raw)
 
-    print_diff(original_code, fixed_code)
+    print("[llm-fix] Removing comments...")
+    java_code = strip_comments(java_code)
+
+    print("[llm-fix] Enforcing required imports...")
+    java_code = enforce_imports(java_code)
+
+    java_code = java_code.strip() + "\n"
+
+    print_diff(original_code, java_code)
 
     print("[llm-fix] Writing fixed App.java...")
-    JAVA_FILE.write_text(fixed_code, encoding="utf-8")
+    JAVA_FILE.write_text(java_code, encoding="utf-8")
 
     print("[llm-fix] Auto-fix completed successfully")
