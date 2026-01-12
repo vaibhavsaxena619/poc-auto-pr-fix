@@ -32,10 +32,18 @@ pipeline {
             }
             steps {
                 echo "Compilation failed. Sending errors to Gemini..."
-                withCredentials([string(credentialsId: 'gemini-api-key', variable: 'GEMINI_API_KEY')]) {
-                    bat '''
-                        python llm_fix.py build\\compile_errors.txt
-                    '''
+                script {
+                    try {
+                        withCredentials([string(credentialsId: 'Gemini_API_key', variable: 'GEMINI_API_KEY')]) {
+                            bat '''
+                                python llm_fix.py build\\compile_errors.txt
+                            '''
+                        }
+                    } catch (Exception e) {
+                        echo "Failed to find credential 'Gemini_API_key': ${e.message}"
+                        echo "Please check your Jenkins credentials and update the credentialsId"
+                        throw e
+                    }
                 }
             }
         }
