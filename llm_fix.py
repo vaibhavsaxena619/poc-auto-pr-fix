@@ -2,6 +2,8 @@ import sys
 import re
 import json
 import urllib.request
+import urllib.error
+import time
 from pathlib import Path
 import difflib
 
@@ -11,6 +13,10 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "deepseek-coder:latest"
 
 JAVA_FILE = Path("src") / "App.java"
+
+OLLAMA_TIMEOUT_SECONDS = 180     # DeepSeek is slow
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 5
 
 # ----------------------------------------
 
@@ -56,15 +62,26 @@ Compilation errors:
         headers={"Content-Type": "application/json"}
     )
 
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        return data.get("response", "")
+    last_error = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            print(f"[llm-fix] Ollama attempt {attempt}/{MAX_RETRIES}...")
+            with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_SECONDS) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data.get("response", "")
+        except Exception as e:
+            last_error = e
+            print(f"[llm-fix] Ollama attempt {attempt} failed: {e}")
+            if attempt < MAX_RETRIES:
+                print(f"[llm-fix] Retrying in {RETRY_DELAY_SECONDS}s...")
+                time.sleep(RETRY_DELAY_SECONDS)
+
+    fail(f"Ollama failed after {MAX_RETRIES} attempts: {last_error}")
 
 
 def strip_comments(code: str) -> str:
-    # Remove block comments
     code = re.sub(r"/\*[\s\S]*?\*/", "", code)
-    # Remove line comments
     code = re.sub(r"//.*", "", code)
     return code
 
