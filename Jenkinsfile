@@ -36,7 +36,9 @@ pipeline {
                     try {
                         withCredentials([
                             string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY'),
-                            string(credentialsId: 'github-pat', variable: 'GITHUB_PAT')
+                            usernamePassword(credentialsId: 'github-pat', 
+                                           usernameVariable: 'GITHUB_USERNAME', 
+                                           passwordVariable: 'GITHUB_PAT')
                         ]) {
                             bat '''
                                 pip install google-genai
