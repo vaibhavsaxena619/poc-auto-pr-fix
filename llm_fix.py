@@ -1,19 +1,18 @@
 import sys
 import re
 import json
-import urllib.request
-import urllib.error
 import time
 from pathlib import Path
 import difflib
 import os
+from google import generativeai as genai
 
 # ---------------- CONFIG ----------------
 
 # Get your API key from: https://aistudio.google.com/app/apikey
 # For Jenkins: Use credentials with ID "Gemini API key"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_key")
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+MODEL_NAME = "gemini-1.5-flash"
 
 JAVA_FILE = Path("src") / "App.java"
 
@@ -36,6 +35,9 @@ def call_gemini(errors: str) -> str:
     if not GEMINI_API_KEY:
         fail("GEMINI_API_KEY environment variable not set. Get your API key from: https://aistudio.google.com/app/apikey")
     
+    # Configure the API key
+    genai.configure(api_key=GEMINI_API_KEY)
+    
     prompt = f"""
 You are fixing Java compilation errors in a CI pipeline.
 
@@ -52,38 +54,32 @@ Compilation errors:
 {errors}
 """
 
-    payload = json.dumps({
-        "contents": [{
-            "parts": [{
-                "text": prompt
-            }]
-        }],
-        "generationConfig": {
-            "temperature": 0.0,
-            "topP": 0.1,
-            "maxOutputTokens": 8192
-        }
-    }).encode("utf-8")
-
-    url_with_key = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
-    req = urllib.request.Request(
-        url_with_key,
-        data=payload,
-        headers={"Content-Type": "application/json"}
-    )
+    # Configure generation parameters
+    generation_config = {
+        "temperature": 0.0,
+        "top_p": 0.1,
+        "max_output_tokens": 8192,
+    }
 
     last_error = None
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             print(f"[llm-fix] Gemini attempt {attempt}/{MAX_RETRIES}...")
-            with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT_SECONDS) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                
-                if "candidates" in data and len(data["candidates"]) > 0:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                else:
-                    raise Exception(f"No response from Gemini: {data}")
+            
+            # Create the model
+            model = genai.GenerativeModel(
+                model_name=MODEL_NAME,
+                generation_config=generation_config
+            )
+            
+            # Generate content
+            response = model.generate_content(prompt)
+            
+            if response.text:
+                return response.text
+            else:
+                raise Exception(f"No response text from Gemini: {response}")
                     
         except Exception as e:
             last_error = e
