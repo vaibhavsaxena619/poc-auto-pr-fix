@@ -34,15 +34,18 @@ pipeline {
                 echo "Compilation failed. Sending errors to Gemini..."
                 script {
                     try {
-                        withCredentials([string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY')]) {
+                        withCredentials([
+                            string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY'),
+                            string(credentialsId: 'github-pat', variable: 'GITHUB_PAT')
+                        ]) {
                             bat '''
                                 pip install google-genai
                                 python llm_fix.py build\\compile_errors.txt
                             '''
                         }
                     } catch (Exception e) {
-                        echo "Failed to find credential 'GEMINI_API_KEY': ${e.message}"
-                        echo "Please check your Jenkins credentials and update the credentialsId"
+                        echo "Failed to execute auto-fix: ${e.message}"
+                        echo "Please check your Jenkins credentials"
                         throw e
                     }
                 }

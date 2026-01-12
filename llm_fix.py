@@ -2,6 +2,7 @@ import sys
 import re
 import json
 import time
+import subprocess
 from pathlib import Path
 import difflib
 import os
@@ -12,6 +13,7 @@ from google import genai
 # Get your API key from: https://aistudio.google.com/app/apikey
 # For Jenkins: Use credentials with ID "Gemini API key"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_key")
+GITHUB_PAT = os.getenv("github-pat") or os.getenv("GITHUB_PAT")
 MODEL_NAME = "gemini-3-flash-preview"
 
 JAVA_FILE = Path("src") / "App.java"
@@ -25,6 +27,82 @@ RETRY_DELAY_SECONDS = 5
 def fail(msg: str):
     print(f"[llm-fix] ERROR: {msg}")
     sys.exit(1)
+
+
+def run_git_command(cmd: list) -> str:
+    """Run a git command and return the output"""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"[llm-fix] Git command failed: {' '.join(cmd)}")
+        print(f"[llm-fix] Error: {e.stderr}")
+        return ""
+
+
+def get_last_committer() -> dict:
+    """Get the last committer information"""
+    name = run_git_command(["git", "log", "-1", "--pretty=format:%an"])
+    email = run_git_command(["git", "log", "-1", "--pretty=format:%ae"])
+    return {"name": name, "email": email}
+
+
+def setup_git_credentials():
+    """Configure git with GitHub PAT for authentication"""
+    if not GITHUB_PAT:
+        print("[llm-fix] WARNING: GITHUB_PAT not set, skipping git operations")
+        return False
+    
+    # Get repository URL and extract repo info
+    remote_url = run_git_command(["git", "remote", "get-url", "origin"])
+    if "github.com" in remote_url:
+        # Convert to PAT-authenticated URL
+        if remote_url.startswith("https://"):
+            repo_part = remote_url.replace("https://github.com/", "")
+            auth_url = f"https://{GITHUB_PAT}@github.com/{repo_part}"
+            run_git_command(["git", "remote", "set-url", "origin", auth_url])
+    
+    return True
+
+
+def commit_and_push_changes(original_errors: str, last_committer: dict):
+    """Commit the fixed code and push to repository"""
+    if not setup_git_credentials():
+        print("[llm-fix] Skipping git operations due to missing credentials")
+        return
+    
+    # Configure git user (use Jenkins/CI user)
+    run_git_command(["git", "config", "user.name", "Jenkins Auto-Fix Bot"])
+    run_git_command(["git", "config", "user.email", "jenkins@ci.local"])
+    
+    # Add the fixed file
+    run_git_command(["git", "add", str(JAVA_FILE)])
+    
+    # Create commit message with issue details
+    commit_msg = f"""Auto-fix: Resolved Java compilation errors
+
+Issues fixed:
+{original_errors[:500]}{'...' if len(original_errors) > 500 else ''}
+
+Fixed by: Jenkins Auto-Fix Bot using Gemini AI
+Reviewer: {last_committer['name']} <{last_committer['email']}>
+
+Auto-generated commit from CI/CD pipeline
+"""
+    
+    # Commit the changes
+    result = run_git_command(["git", "commit", "-m", commit_msg])
+    if result:
+        print(f"[llm-fix] Committed changes: {result}")
+        
+        # Push the changes
+        push_result = run_git_command(["git", "push", "origin", "HEAD"])
+        if push_result:
+            print("[llm-fix] Successfully pushed changes to repository")
+        else:
+            print("[llm-fix] Failed to push changes")
+    else:
+        print("[llm-fix] Failed to commit changes")
 
 
 def read_text(path: Path) -> str:
@@ -151,6 +229,10 @@ if __name__ == "__main__":
         print("[llm-fix] No errors found — skipping")
         sys.exit(0)
 
+    # Get last committer info before making changes
+    last_committer = get_last_committer()
+    print(f"[llm-fix] Last committer: {last_committer['name']} <{last_committer['email']}>")
+
     original_code = read_text(JAVA_FILE)
 
     print("[llm-fix] Sending errors to Gemini...")
@@ -173,3 +255,9 @@ if __name__ == "__main__":
     JAVA_FILE.write_text(java_code, encoding="utf-8")
 
     print("[llm-fix] Auto-fix completed successfully")
+    
+    # Commit and push the changes
+    print("[llm-fix] Committing changes to git...")
+    commit_and_push_changes(errors, last_committer)
+    
+    print("[llm-fix] Process completed - code fixed and committed to repository")
