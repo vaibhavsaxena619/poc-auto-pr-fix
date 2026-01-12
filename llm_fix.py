@@ -5,14 +5,14 @@ import time
 from pathlib import Path
 import difflib
 import os
-from google import generativeai as genai
+from google import genai
 
 # ---------------- CONFIG ----------------
 
 # Get your API key from: https://aistudio.google.com/app/apikey
 # For Jenkins: Use credentials with ID "Gemini API key"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_key")
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-1.5-flash-latest"
 
 JAVA_FILE = Path("src") / "App.java"
 
@@ -35,9 +35,6 @@ def call_gemini(errors: str) -> str:
     if not GEMINI_API_KEY:
         fail("GEMINI_API_KEY environment variable not set. Get your API key from: https://aistudio.google.com/app/apikey")
     
-    # Configure the API key
-    genai.configure(api_key=GEMINI_API_KEY)
-    
     prompt = f"""
 You are fixing Java compilation errors in a CI pipeline.
 
@@ -54,27 +51,20 @@ Compilation errors:
 {errors}
 """
 
-    # Configure generation parameters
-    generation_config = {
-        "temperature": 0.0,
-        "top_p": 0.1,
-        "max_output_tokens": 8192,
-    }
-
     last_error = None
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             print(f"[llm-fix] Gemini attempt {attempt}/{MAX_RETRIES}...")
             
-            # Create the model
-            model = genai.GenerativeModel(
-                model_name=MODEL_NAME,
-                generation_config=generation_config
-            )
+            # Create the client with API key
+            client = genai.Client(api_key=GEMINI_API_KEY)
             
-            # Generate content
-            response = model.generate_content(prompt)
+            # Generate content using the new API
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt
+            )
             
             if response.text:
                 return response.text

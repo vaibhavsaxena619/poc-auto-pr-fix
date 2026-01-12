@@ -36,7 +36,7 @@ pipeline {
                     try {
                         withCredentials([string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY')]) {
                             bat '''
-                                pip install google-generativeai
+                                pip install google-genai
                                 python llm_fix.py build\\compile_errors.txt
                             '''
                         }
