@@ -30,14 +30,13 @@ pipeline {
                            readFile('build\\compile_errors.txt').trim().length() > 0
                 }
             }
-            environment {
-                GEMINI_API_KEY = credentials('Gemini API key')
-            }
             steps {
                 echo "Compilation failed. Sending errors to Gemini..."
-                bat '''
-                    python llm_fix.py build\\compile_errors.txt
-                '''
+                withCredentials([string(credentialsId: 'gemini-api-key', variable: 'GEMINI_API_KEY')]) {
+                    bat '''
+                        python llm_fix.py build\\compile_errors.txt
+                    '''
+                }
             }
         }
 
