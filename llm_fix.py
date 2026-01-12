@@ -95,8 +95,8 @@ Auto-generated commit from CI/CD pipeline
     if result:
         print(f"[llm-fix] Committed changes: {result}")
         
-        # Push the changes
-        push_result = run_git_command(["git", "push", "origin", "HEAD"])
+        # Push the changes to main branch
+        push_result = run_git_command(["git", "push", "origin", "HEAD:main"])
         if push_result:
             print("[llm-fix] Successfully pushed changes to repository")
         else:
