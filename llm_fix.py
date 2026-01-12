@@ -6,15 +6,18 @@ import urllib.error
 import time
 from pathlib import Path
 import difflib
+import os
 
 # ---------------- CONFIG ----------------
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "deepseek-coder:latest"
+# Get your API key from: https://aistudio.google.com/app/apikey
+# For Jenkins: Use credentials with ID "Gemini API key"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_key")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 JAVA_FILE = Path("src") / "App.java"
 
-OLLAMA_TIMEOUT_SECONDS = 180     # DeepSeek is slow
+GEMINI_TIMEOUT_SECONDS = 60
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 5
 
@@ -29,7 +32,10 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
-def call_ollama(errors: str) -> str:
+def call_gemini(errors: str) -> str:
+    if not GEMINI_API_KEY:
+        fail("GEMINI_API_KEY environment variable not set. Get your API key from: https://aistudio.google.com/app/apikey")
+    
     prompt = f"""
 You are fixing Java compilation errors in a CI pipeline.
 
@@ -47,17 +53,21 @@ Compilation errors:
 """
 
     payload = json.dumps({
-        "model": MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
+        "contents": [{
+            "parts": [{
+                "text": prompt
+            }]
+        }],
+        "generationConfig": {
             "temperature": 0.0,
-            "top_p": 0.1
+            "topP": 0.1,
+            "maxOutputTokens": 8192
         }
     }).encode("utf-8")
 
+    url_with_key = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
     req = urllib.request.Request(
-        OLLAMA_URL,
+        url_with_key,
         data=payload,
         headers={"Content-Type": "application/json"}
     )
@@ -66,18 +76,23 @@ Compilation errors:
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            print(f"[llm-fix] Ollama attempt {attempt}/{MAX_RETRIES}...")
-            with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_SECONDS) as resp:
+            print(f"[llm-fix] Gemini attempt {attempt}/{MAX_RETRIES}...")
+            with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT_SECONDS) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                return data.get("response", "")
+                
+                if "candidates" in data and len(data["candidates"]) > 0:
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                else:
+                    raise Exception(f"No response from Gemini: {data}")
+                    
         except Exception as e:
             last_error = e
-            print(f"[llm-fix] Ollama attempt {attempt} failed: {e}")
+            print(f"[llm-fix] Gemini attempt {attempt} failed: {e}")
             if attempt < MAX_RETRIES:
                 print(f"[llm-fix] Retrying in {RETRY_DELAY_SECONDS}s...")
                 time.sleep(RETRY_DELAY_SECONDS)
 
-    fail(f"Ollama failed after {MAX_RETRIES} attempts: {last_error}")
+    fail(f"Gemini failed after {MAX_RETRIES} attempts: {last_error}")
 
 
 def strip_comments(code: str) -> str:
@@ -152,8 +167,8 @@ if __name__ == "__main__":
 
     original_code = read_text(JAVA_FILE)
 
-    print("[llm-fix] Sending errors to DeepSeek-Coder...")
-    raw = call_ollama(errors)
+    print("[llm-fix] Sending errors to Gemini...")
+    raw = call_gemini(errors)
 
     print("[llm-fix] Extracting App class...")
     java_code = extract_app_class(raw)

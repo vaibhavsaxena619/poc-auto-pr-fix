@@ -23,15 +23,18 @@ pipeline {
             }
         }
 
-        stage('Auto-Fix via Ollama') {
+        stage('Auto-Fix via Gemini') {
             when {
                 expression {
                     return fileExists('build\\compile_errors.txt') &&
                            readFile('build\\compile_errors.txt').trim().length() > 0
                 }
             }
+            environment {
+                GEMINI_API_KEY = credentials('Gemini API key')
+            }
             steps {
-                echo "Compilation failed. Sending errors to Ollama..."
+                echo "Compilation failed. Sending errors to Gemini..."
                 bat '''
                     python llm_fix.py build\\compile_errors.txt
                 '''
@@ -52,7 +55,7 @@ pipeline {
             echo "✅ Build succeeded (auto-fix applied if needed)"
         }
         failure {
-            echo "❌ Build failed even after Ollama auto-fix"
+            echo "❌ Build failed even after Gemini auto-fix"
         }
     }
 }
