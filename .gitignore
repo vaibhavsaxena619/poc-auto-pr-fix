@@ -1,0 +1,37 @@
+# Build artifacts
+build/
+bin/
+*.class
+*.jar
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.iml
+
+# Local configuration (sensitive data)
+JENKINS_CREDENTIALS.md
+JENKINS_CREDENTIALS.local
+
+# Development and testing files
+test_jenkins_pr.bat
+test_jenkins_pr.sh
+*.log
+
+# Documentation (local reference only)
+REFACTORING_SUMMARY.md
+PRODUCTION_READINESS.md
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/

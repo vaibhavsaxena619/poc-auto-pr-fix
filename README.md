@@ -126,6 +126,10 @@ Available for download in Jenkins
 2. Compile Java
 3. Fail if errors (no recovery)
 
+## Quick Start
+
+For a **5-minute setup**, see [docs/QUICKSTART.md](docs/QUICKSTART.md)
+
 ## Setup Instructions
 
 ### Prerequisites
@@ -142,19 +146,21 @@ pip install google-genai requests
 
 ### 2. Configure Jenkins Credentials
 
-Follow [JENKINS_CREDENTIALS.md](JENKINS_CREDENTIALS.md) for:
-- Creating `GEMINI_API_KEY_CREDENTIAL` (Gemini API key)
-- Creating `GITHUB_PAT_CREDENTIAL` (GitHub personal access token)
+**Important:** Keep `JENKINS_CREDENTIALS.md` in your local environment only (in .gitignore).
+
+To set up credentials:
+1. Create Gemini API key at https://aistudio.google.com/app/apikey
+2. Create GitHub PAT at https://github.com/settings/tokens (scopes: `repo`, `workflow`)
+3. In Jenkins:
+   - Add credential with ID: `GEMINI_API_KEY_CREDENTIAL` (secret text)
+   - Add credential with ID: `GITHUB_PAT_CREDENTIAL` (username + password)
 
 ### 3. Configure GitHub Webhook
 
 In GitHub repository Settings → Webhooks:
 
 **Payload URL:** `http://jenkins-server:8080/github-webhook/`  
-**Events:** Let me select individual events
-- Push events
-- Pull request events
-
+**Events:** Push events + Pull request events  
 **Content type:** application/json
 
 ### 4. Create Jenkins Multibranch Pipeline
@@ -174,7 +180,6 @@ In GitHub repository Settings → Webhooks:
 **Test PR Review:**
 ```bash
 git checkout -b feature/test-pr
-# Make a change
 git push origin feature/test-pr
 # Create PR to master in GitHub
 ```
@@ -182,7 +187,6 @@ git push origin feature/test-pr
 **Test Master Build:**
 ```bash
 git push origin master
-# Watch Jenkins build
 ```
 
 ## File Structure
@@ -192,15 +196,23 @@ git push origin master
 ├── Jenkinsfile                 # Jenkins pipeline definition
 ├── pr_review.py               # GitHub PR code review script
 ├── build_fix.py               # Master build error recovery
+├── llm_fix.py                 # Auto-fix for errors (reference)
+├── README.md                  # This file
+├── .gitignore                 # Git ignore patterns
 ├── src/
 │   └── App.java               # Sample Java application
-├── build/                      # Build artifacts (generated)
+├── build/                      # Build artifacts (local only, not in git)
 │   ├── classes/               # Compiled .class files
-│   ├── App.jar               # Packaged JAR
-│   └── logs/                 # Build logs
-├── README.md                  # This file
-├── JENKINS_CREDENTIALS.md     # Credential setup guide
-└── TROUBLESHOOTING.md         # Troubleshooting guide
+│   └── App.jar               # Packaged JAR
+└── docs/                       # Documentation (in git)
+    ├── QUICKSTART.md          # 5-minute setup guide
+    └── TROUBLESHOOTING.md     # Issue resolution
+
+LOCAL ONLY (in .gitignore):
+├── JENKINS_CREDENTIALS.md     # Credential setup (sensitive)
+├── PRODUCTION_READINESS.md    # Verification checklist
+├── REFACTORING_SUMMARY.md     # Historical changes
+└── build/                      # Build artifacts
 ```
 
 ## Environment Variables
@@ -265,7 +277,7 @@ GEMINI_API_KEY=your_key python build_fix.py src/App.java
 
 ## Troubleshooting
 
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues:
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues:
 - Credentials errors
 - API failures
 - Git operations failing
@@ -337,7 +349,7 @@ This project is provided as-is for CI/CD automation purposes.
 ## Support
 
 For issues or questions:
-1. Check [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+1. Check [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 2. Review Jenkins build logs
-3. Verify credentials in [JENKINS_CREDENTIALS.md](JENKINS_CREDENTIALS.md)
+3. For credential setup: See `JENKINS_CREDENTIALS.md` in your local environment
 4. Check GitHub webhook delivery logs
