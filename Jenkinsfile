@@ -57,20 +57,28 @@ pipeline {
                                                    usernameVariable: 'GITHUB_USERNAME', 
                                                    passwordVariable: 'GITHUB_PAT')
                                 ]) {
-                                    bat '''
+                                    // Run the auto-fix with better error handling
+                                    def result = bat(script: '''
                                         echo Installing dependencies...
                                         pip install google-genai
                                         
                                         echo Running Gemini auto-fix...
                                         python llm_fix.py build\\compile_errors.txt
-                                        
-                                        echo Auto-fix completed. Code has been pushed back to repository.
-                                    '''
+                                        echo Auto-fix process completed.
+                                    ''', returnStatus: true)
+                                    
+                                    if (result == 0) {
+                                        echo "SUCCESS: Gemini auto-fix completed successfully"
+                                    } else {
+                                        echo "WARNING: Auto-fix process had issues but may have still applied fixes"
+                                        echo "Continuing to verify if code compiles..."
+                                    }
                                 }
                             } catch (Exception e) {
-                                echo "❌ Failed to execute auto-fix: ${e.message}"
+                                echo "ERROR: Failed to execute auto-fix: ${e.message}"
                                 echo "Please check your Jenkins credentials and Gemini API key"
-                                throw e
+                                // Don't fail the build here - let verification stage determine success
+                                echo "Continuing to verification stage to check if manual fixes are needed..."
                             }
                         }
                     }
@@ -179,31 +187,39 @@ pipeline {
     post {
         always {
             script {
-                echo "🏁 Pipeline completed for branch: ${BRANCH_NAME}"
+                echo "COMPLETED: Pipeline finished for branch: ${BRANCH_NAME}"
             }
         }
         success {
             script {
                 if (env.BRANCH_NAME == 'main') {
-                    echo "✅ [MAIN BRANCH] Build succeeded - Code auto-fixed and pushed back to repository"
+                    echo "SUCCESS: [MAIN BRANCH] Build succeeded - Code auto-fixed and ready for merge"
                 } else if (env.BRANCH_NAME == 'master') {
-                    echo "✅ [MASTER BRANCH] Production build succeeded - JAR created and archived"
+                    echo "SUCCESS: [MASTER BRANCH] Production build succeeded - JAR created and archived"
                 } else {
-                    echo "✅ [FEATURE BRANCH] Basic compilation check passed"
+                    echo "SUCCESS: [FEATURE BRANCH] Basic compilation check passed"
                 }
             }
         }
         failure {
             script {
                 if (env.BRANCH_NAME == 'main') {
-                    echo "❌ [MAIN BRANCH] Build failed - Auto-fix could not resolve compilation errors"
-                    echo "💡 Please review the errors manually and push a fix"
+                    echo "FAILED: [MAIN BRANCH] Build failed"
+                    echo "TIP: Check if auto-fix was applied before manual intervention"
+                    // Check if the Java file compiles now even though build failed
+                    def compileCheck = bat(script: 'javac src\\App.java', returnStatus: true)
+                    if (compileCheck == 0) {
+                        echo "NOTE: Java code actually compiles successfully now!"
+                        echo "The failure might have been due to git push issues, not compilation"
+                    } else {
+                        echo "CONFIRM: Compilation still failing - manual review needed"
+                    }
                 } else if (env.BRANCH_NAME == 'master') {
-                    echo "❌ [MASTER BRANCH] Production build failed"
-                    echo "💡 Please ensure main branch is stable before merging to master"
+                    echo "FAILED: [MASTER BRANCH] Production build failed"
+                    echo "TIP: Please ensure main branch is stable before merging to master"
                 } else {
-                    echo "❌ [FEATURE BRANCH] Compilation check failed"
-                    echo "💡 Please fix compilation errors before creating pull request"
+                    echo "FAILED: [FEATURE BRANCH] Compilation check failed"
+                    echo "TIP: Please fix compilation errors before creating pull request"
                 }
             }
         }

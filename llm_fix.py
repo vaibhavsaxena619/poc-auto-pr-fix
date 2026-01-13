@@ -98,7 +98,7 @@ def commit_and_push_changes(original_errors: str, last_committer: dict, original
     # Create detailed commit message with patch notes
     patch_notes = "\n".join(changes_made)
     
-    commit_msg = f"""🤖 AUTO-FIX: Resolved Java compilation errors
+    commit_msg = f"""AUTO-FIX: Resolved Java compilation errors
 
 PATCH NOTES:
 {patch_notes}
@@ -115,24 +115,24 @@ TECHNICAL DETAILS:
 FILES MODIFIED:
 - src/App.java (compilation errors resolved)
 
-REVIEW STATUS: ✅ Ready for merge to master branch
+REVIEW STATUS: Ready for merge to master branch
 """
     
     # Commit the changes
     result = run_git_command(["git", "commit", "-m", commit_msg])
     if result:
-        print(f"[llm-fix] Committed changes with detailed patch notes")
+        print("[llm-fix] Committed changes with detailed patch notes")
         
         # Push the changes to main branch
         push_result = run_git_command(["git", "push", "origin", "HEAD:main"])
         if push_result:
-            print("[llm-fix] ✅ Successfully pushed auto-fixed code to main branch")
-            print("[llm-fix] 📝 Patch notes included in commit message")
-            print("[llm-fix] 🔄 Ready for merge to master branch")
+            print("[llm-fix] SUCCESS: Auto-fixed code pushed to main branch")
+            print("[llm-fix] PATCH NOTES: Included in commit message")
+            print("[llm-fix] STATUS: Ready for merge to master branch")
         else:
-            print("[llm-fix] ❌ Failed to push changes")
+            print("[llm-fix] ERROR: Failed to push changes")
     else:
-        print("[llm-fix] ❌ Failed to commit changes")
+        print("[llm-fix] ERROR: Failed to commit changes")
 
 
 def read_text(path: Path) -> str:
