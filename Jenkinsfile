@@ -27,11 +27,19 @@ pipeline {
         // PR WORKFLOW: Code Review
         stage('Pull Request Review') {
             when {
-                expression { return env.IS_PR == 'true' }
+                changeRequest()
             }
             steps {
-                echo "Conducting Gemini code review for PR #${PR_NUMBER}: ${PR_SOURCE_BRANCH} -> ${PR_TARGET_BRANCH}"
+                echo "=== PR DETECTED ==="
+                echo "PR Number: ${env.CHANGE_ID}"
+                echo "PR Title: ${env.CHANGE_TITLE}"
+                echo "PR Author: ${env.CHANGE_AUTHOR}"
+                echo "Source Branch: ${env.CHANGE_BRANCH}"
+                echo "Target Branch: ${env.CHANGE_TARGET}"
+                echo "PR URL: ${env.CHANGE_URL}"
+                
                 script {
+                    echo "Conducting Gemini code review for PR #${env.CHANGE_ID}: ${env.CHANGE_BRANCH} -> ${env.CHANGE_TARGET}"
                     try {
                         withCredentials([
                             string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY'),
@@ -47,13 +55,14 @@ pipeline {
                                 git fetch origin
                                 
                                 echo Running Gemini code review...
-                                python pr_review.py %PR_NUMBER% %PR_TARGET_BRANCH% %PR_SOURCE_BRANCH% code_review
+                                python pr_review.py %CHANGE_ID% %CHANGE_TARGET% %CHANGE_BRANCH% code_review
                             '''
                         }
+                        echo "PR review completed successfully"
                     } catch (Exception e) {
                         echo "PR review failed: ${e.message}"
-                        // Don't fail the build - let merge attempt proceed
-                        script {
+                        // Try merge conflict analysis
+                        try {
                             withCredentials([
                                 string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY'),
                                 usernamePassword(credentialsId: 'github-pat', 
@@ -62,9 +71,15 @@ pipeline {
                             ]) {
                                 bat '''
                                     echo Analyzing merge conflict...
-                                    python pr_review.py %PR_NUMBER% %PR_TARGET_BRANCH% %PR_SOURCE_BRANCH% merge_conflict
+                                    python pr_review.py %CHANGE_ID% %CHANGE_TARGET% %CHANGE_BRANCH% merge_conflict
                                 '''
                             }
+                        } catch (Exception e2) {
+                            echo "Merge conflict analysis also failed: ${e2.message}"
+                            // Post a simple comment that we tried
+                            bat '''
+                                echo "Jenkins attempted to review PR but encountered technical issues. Please review manually." > pr_error.txt
+                            '''
                         }
                     }
                 }
@@ -341,15 +356,15 @@ pipeline {
         always {
             script {
                 echo "COMPLETED: Pipeline finished for branch: ${BRANCH_NAME}"
-                if (env.IS_PR == 'true') {
-                    echo "PR #${PR_NUMBER} processing completed"
+                if (env.CHANGE_ID) {
+                    echo "PR #${env.CHANGE_ID} processing completed"
                 }
             }
         }
         success {
             script {
-                if (env.IS_PR == 'true') {
-                    echo "SUCCESS: [PR #${PR_NUMBER}] Code review completed - ready for merge"
+                if (env.CHANGE_ID) {
+                    echo "SUCCESS: [PR #${env.CHANGE_ID}] Code review completed - ready for merge"
                 } else if (env.BRANCH_NAME == 'main') {
                     echo "SUCCESS: [MAIN BRANCH] Build succeeded - Code auto-fixed and ready for merge"
                 } else if (env.BRANCH_NAME == 'master') {
@@ -361,8 +376,8 @@ pipeline {
         }
         failure {
             script {
-                if (env.IS_PR == 'true') {
-                    echo "FAILED: [PR #${PR_NUMBER}] Review process encountered issues"
+                if (env.CHANGE_ID) {
+                    echo "FAILED: [PR #${env.CHANGE_ID}] Review process encountered issues"
                     echo "TIP: Check PR comments for Gemini analysis and recommendations"
                 } else if (env.BRANCH_NAME == 'main') {
                     echo "FAILED: [MAIN BRANCH] Build failed"
