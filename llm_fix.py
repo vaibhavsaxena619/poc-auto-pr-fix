@@ -9,12 +9,9 @@ import os
 from google import genai
 
 # ---------------- CONFIG ----------------
-
-# Get your API key from: https://aistudio.google.com/app/apikey
-# For Jenkins: Use credentials with ID "Gemini API key"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_key")
-GITHUB_PAT = os.getenv("github-pat") or os.getenv("GITHUB_PAT")
-MODEL_NAME = "gemini-3-flash-preview"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GITHUB_PAT = os.getenv("GITHUB_PAT")
+MODEL_NAME = "gemini-1.5-flash"
 
 JAVA_FILE = Path("src") / "App.java"
 

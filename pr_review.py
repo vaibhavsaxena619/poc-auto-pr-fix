@@ -7,12 +7,12 @@ from pathlib import Path
 from google import genai
 
 # ---------------- CONFIG ----------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_key")
-GITHUB_PAT = os.getenv("github-pat") or os.getenv("GITHUB_PAT")
-MODEL_NAME = "gemini-3-flash-preview"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GITHUB_PAT = os.getenv("GITHUB_PAT")
+MODEL_NAME = "gemini-1.5-flash"
 
-REPO_OWNER = "vaibhavsaxena619"
-REPO_NAME = "poc-auto-pr-fix"
+REPO_OWNER = os.getenv("REPO_OWNER", "vaibhavsaxena619")
+REPO_NAME = os.getenv("REPO_NAME", "poc-auto-pr-fix")
 GITHUB_API_BASE = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
 
 def fail(msg: str):
