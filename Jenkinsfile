@@ -39,7 +39,9 @@ pipeline {
                 echo "PR URL: ${env.CHANGE_URL}"
                 
                 script {
-                    echo "Conducting Gemini code review for PR #${env.CHANGE_ID}: ${env.CHANGE_BRANCH} -> ${env.CHANGE_TARGET}"
+                    echo "Starting Gemini code review for PR #${env.CHANGE_ID}"
+                    echo "Analyzing changes: ${env.CHANGE_BRANCH} -> ${env.CHANGE_TARGET}"
+                    
                     try {
                         withCredentials([
                             string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY'),
@@ -47,21 +49,43 @@ pipeline {
                                            usernameVariable: 'GITHUB_USERNAME', 
                                            passwordVariable: 'GITHUB_PAT')
                         ]) {
+                            // Install dependencies
                             bat '''
-                                echo Installing dependencies for PR review...
-                                pip install google-genai requests
-                                
-                                echo Fetching PR changes...
-                                git fetch origin
-                                
-                                echo Running Gemini code review...
-                                python pr_review.py %CHANGE_ID% %CHANGE_TARGET% %CHANGE_BRANCH% code_review
+                                echo Installing Python dependencies for PR review...
+                                pip install google-genai requests pathlib
                             '''
+                            
+                            // Fetch all branches to ensure we have the diff
+                            bat '''
+                                echo Fetching latest changes from repository...
+                                git fetch origin --prune
+                                git fetch origin +refs/heads/*:refs/remotes/origin/*
+                            '''
+                            
+                            // Run Gemini code review
+                            def reviewResult = bat(script: '''
+                                echo Running Gemini code review analysis...
+                                echo PR Details: #%CHANGE_ID% (%CHANGE_BRANCH% -> %CHANGE_TARGET%)
+                                python pr_review.py %CHANGE_ID% %CHANGE_TARGET% %CHANGE_BRANCH% code_review
+                            ''', returnStatus: true)
+                            
+                            if (reviewResult == 0) {
+                                echo "✅ Gemini code review completed and posted to PR #${env.CHANGE_ID}"
+                                echo "Review comment has been added with @${env.CHANGE_AUTHOR} tag"
+                            } else {
+                                echo "⚠️ Code review had issues but continuing build..."
+                                // Try to post an error comment
+                                bat '''
+                                    echo Code review encountered technical issues. Manual review recommended.
+                                    python pr_review.py %CHANGE_ID% %CHANGE_TARGET% %CHANGE_BRANCH% error_fallback
+                                '''
+                            }
                         }
-                        echo "PR review completed successfully"
                     } catch (Exception e) {
-                        echo "PR review failed: ${e.message}"
-                        // Try merge conflict analysis
+                        echo "❌ PR review failed: ${e.message}"
+                        echo "Attempting merge conflict analysis..."
+                        
+                        // Fallback: try merge conflict analysis
                         try {
                             withCredentials([
                                 string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY'),
@@ -70,16 +94,15 @@ pipeline {
                                                passwordVariable: 'GITHUB_PAT')
                             ]) {
                                 bat '''
-                                    echo Analyzing merge conflict...
+                                    echo Running merge conflict analysis...
                                     python pr_review.py %CHANGE_ID% %CHANGE_TARGET% %CHANGE_BRANCH% merge_conflict
                                 '''
                             }
+                            echo "Merge conflict analysis posted to PR"
                         } catch (Exception e2) {
-                            echo "Merge conflict analysis also failed: ${e2.message}"
-                            // Post a simple comment that we tried
-                            bat '''
-                                echo "Jenkins attempted to review PR but encountered technical issues. Please review manually." > pr_error.txt
-                            '''
+                            echo "All review attempts failed: ${e2.message}"
+                            // Post a simple manual review request
+                            echo "Posting manual review request to PR..."
                         }
                     }
                 }
