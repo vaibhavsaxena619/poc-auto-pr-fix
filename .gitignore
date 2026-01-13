@@ -29,9 +29,12 @@ PRODUCTION_READINESS.md
 Thumbs.db
 *.tmp
 
-# Python cache
+# Python cache and virtual environments
 __pycache__/
 *.pyc
 *.pyo
 .env
+.env.local
 venv/
+env/
+.venv/
