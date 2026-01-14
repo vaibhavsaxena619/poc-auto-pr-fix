@@ -24,60 +24,79 @@ pipeline {
             }
         }
 
-        // PR WORKFLOW: Gemini Code Review (Master PRs only)
-        stage('Code Review') {
+        // PR TO MASTER: Compile + Auto-fix + Code Review
+        stage('PR to Master Build & Review') {
             when {
                 allOf {
                     changeRequest()
                     expression { env.CHANGE_TARGET == 'master' }
                 }
             }
-            steps {
-                echo "PR #${env.CHANGE_ID} to master by ${env.CHANGE_AUTHOR}"
-                script {
-                    try {
-                        withCredentials([
-                            string(credentialsId: 'AZURE_OPENAI_API_KEY_CREDENTIAL', variable: 'AZURE_OPENAI_API_KEY'),
-                            string(credentialsId: 'AZURE_OPENAI_ENDPOINT_CREDENTIAL', variable: 'AZURE_OPENAI_ENDPOINT'),
-                            usernamePassword(credentialsId: 'GITHUB_PAT_CREDENTIAL', 
-                                           usernameVariable: 'GITHUB_USERNAME', 
-                                           passwordVariable: 'GITHUB_PAT')
-                        ]) {
-                            sh '''
-                                pip install openai requests --quiet
-                                git fetch origin --prune --quiet
-                                python pr_review.py ${CHANGE_ID} master ${CHANGE_BRANCH}
-                            '''
+            stages {
+                stage('Compile & Auto-Fix') {
+                    steps {
+                        script {
+                            echo "PR #${env.CHANGE_ID} to master by ${env.CHANGE_AUTHOR}"
+                            try {
+                                sh '''
+                                    mkdir -p build/classes
+                                    javac -d build/classes src/App.java
+                                    echo "✓ Compilation successful"
+                                '''
+                                env.COMPILATION_SUCCESS = 'true'
+                            } catch (Exception e) {
+                                echo "✗ Compilation failed - Attempting GPT-5 auto-fix..."
+                                env.COMPILATION_SUCCESS = 'false'
+                                
+                                withCredentials([
+                                    string(credentialsId: 'AZURE_OPENAI_API_KEY_CREDENTIAL', variable: 'AZURE_OPENAI_API_KEY'),
+                                    string(credentialsId: 'AZURE_OPENAI_ENDPOINT_CREDENTIAL', variable: 'AZURE_OPENAI_ENDPOINT'),
+                                    usernamePassword(credentialsId: 'GITHUB_PAT_CREDENTIAL',
+                                                   usernameVariable: 'GITHUB_USERNAME',
+                                                   passwordVariable: 'GITHUB_PAT')
+                                ]) {
+                                    sh '''
+                                        echo "Sending compilation error to GPT-5 for analysis..."
+                                        pip install openai requests --quiet
+                                        python build_fix.py src/App.java
+                                    '''
+                                }
+                                
+                                // Retry compilation after fix
+                                sh '''
+                                    javac -d build/classes src/App.java
+                                    if [ $? -eq 0 ]; then
+                                        echo "✓ GPT-5 auto-fix successful - compilation now passes"
+                                        exit 0
+                                    else
+                                        echo "✗ Auto-fix failed - compilation still failing"
+                                        exit 1
+                                    fi
+                                '''
+                            }
                         }
-                        echo "Code review posted to PR #${env.CHANGE_ID}"
-                    } catch (Exception e) {
-                        echo "Code review failed: ${e.message}"
-                        currentBuild.result = 'FAILURE'
                     }
                 }
-            }
-        }
 
-        // MAIN BRANCH WORKFLOW: Compile only (no auto-fix, no push)
-        stage('Main Branch Build') {
-            when {
-                anyOf {
-                    branch 'main'
-                    environment name: 'BRANCH_NAME', value: 'main'
-                }
-            }
-            steps {
-                script {
-                    echo "Main branch: Compiling Java code..."
-                    sh '''
-                        mkdir -p build
-                        javac src/App.java
-                        if [ $? -ne 0 ]; then
-                            echo "Compilation failed on main branch"
-                            exit 1
-                        fi
-                        echo "Compilation successful"
-                    '''
+                stage('Code Review & Approval') {
+                    steps {
+                        script {
+                            withCredentials([
+                                string(credentialsId: 'AZURE_OPENAI_API_KEY_CREDENTIAL', variable: 'AZURE_OPENAI_API_KEY'),
+                                string(credentialsId: 'AZURE_OPENAI_ENDPOINT_CREDENTIAL', variable: 'AZURE_OPENAI_ENDPOINT'),
+                                usernamePassword(credentialsId: 'GITHUB_PAT_CREDENTIAL',
+                                               usernameVariable: 'GITHUB_USERNAME',
+                                               passwordVariable: 'GITHUB_PAT')
+                            ]) {
+                                sh '''
+                                    pip install openai requests --quiet
+                                    git fetch origin --prune --quiet
+                                    python pr_review.py ${CHANGE_ID} master ${CHANGE_BRANCH}
+                                '''
+                            }
+                            echo "Code review completed for PR #${env.CHANGE_ID}"
+                        }
+                    }
                 }
             }
         }
@@ -181,24 +200,18 @@ pipeline {
             }
         }
 
-        // FEATURE BRANCHES: Basic compilation check
-        stage('Feature Branch Build') {
+        // FEATURE BRANCHES: SKIPPED - Nothing happens
+        stage('Other Branches') {
             when {
                 not {
                     anyOf {
-                        branch 'main'
                         branch 'master'
                     }
                 }
             }
             steps {
                 script {
-                    echo "Feature branch: Running compilation check..."
-                    sh '''
-                        javac src/App.java
-                        if [ $? -ne 0 ]; then exit 1; fi
-                        echo "Compilation successful"
-                    '''
+                    echo "⊘ Branch ${BRANCH_NAME}: No build triggered (only master builds are processed)"
                 }
             }
         }
@@ -213,26 +226,18 @@ pipeline {
         success {
             script {
                 if (env.CHANGE_ID) {
-                    echo "SUCCESS: PR #${env.CHANGE_ID} code review completed"
-                } else if (env.BRANCH_NAME == 'main') {
-                    echo "SUCCESS: Main branch compiled successfully"
+                    echo "✓ SUCCESS: PR #${env.CHANGE_ID} - Build complete, code review posted"
                 } else if (env.BRANCH_NAME == 'master') {
-                    echo "SUCCESS: Master branch production build complete"
-                } else {
-                    echo "SUCCESS: Feature branch compilation check passed"
+                    echo "✓ SUCCESS: Master branch production build complete"
                 }
             }
         }
         failure {
             script {
                 if (env.CHANGE_ID) {
-                    echo "FAILED: PR #${env.CHANGE_ID} review failed"
-                } else if (env.BRANCH_NAME == 'main') {
-                    echo "FAILED: Main branch compilation failed"
+                    echo "✗ FAILED: PR #${env.CHANGE_ID} - Build or review failed"
                 } else if (env.BRANCH_NAME == 'master') {
-                    echo "FAILED: Master branch build failed after recovery attempt"
-                } else {
-                    echo "FAILED: Feature branch compilation failed"
+                    echo "✗ FAILED: Master branch build failed after recovery attempt"
                 }
             }
         }
