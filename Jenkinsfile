@@ -3,6 +3,8 @@ pipeline {
     
     environment {
         BRANCH_NAME = "${env.GIT_BRANCH?.replace('origin/', '') ?: 'unknown'}"
+        AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
+        AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-5"
     }
 
     stages {
@@ -39,8 +41,6 @@ pipeline {
                         ]) {
                             bat '''
                                 pip install openai requests --quiet
-                                set AZURE_OPENAI_API_VERSION=2024-12-01-preview
-                                set AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5
                                 git fetch origin --prune --quiet
                                 python pr_review.py %CHANGE_ID% master %CHANGE_BRANCH%
                             '''
@@ -67,7 +67,7 @@ pipeline {
                     echo "Main branch: Compiling Java code..."
                     bat '''
                         if not exist build mkdir build
-                        javac src\App.java
+                        javac src/App.java
                         if %ERRORLEVEL% NEQ 0 (
                             echo Compilation failed on main branch
                             exit /B 1
@@ -96,8 +96,8 @@ pipeline {
                             echo "Master: Production compilation..."
                             bat '''
                                 if not exist build mkdir build
-                                if not exist build\classes mkdir build\classes
-                                javac -d build\classes src\App.java
+                                if not exist build/classes mkdir build/classes
+                                javac -d build/classes src/App.java
                                 if %ERRORLEVEL% NEQ 0 exit /B 1
                                 echo Compilation successful
                             '''
@@ -117,15 +117,13 @@ pipeline {
                                     ]) {
                                         bat '''
                                             echo Sending error to Azure OpenAI for analysis...
-                                            set AZURE_OPENAI_API_VERSION=2024-12-01-preview
-                                            set AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5
                                             pip install openai --quiet
-                                            python build_fix.py src\App.java
+                                            python build_fix.py src/App.java
                                         '''
                                     }
                                     echo "Retrying compilation after fixes..."
                                     bat '''
-                                        javac -d build\classes src\App.java
+                                        javac -d build/classes src/App.java
                                         if %ERRORLEVEL% EQU 0 (
                                             echo Recovery successful - compilation passed
                                             exit /B 0
@@ -148,10 +146,10 @@ pipeline {
                     steps {
                         script {
                             bat '''
-                                cd build\classes
-                                jar cfe ..\App.jar App *.class
-                                cd ..\..
-                                if exist build\App.jar echo JAR created successfully
+                                cd build/classes
+                                jar cfe ../App.jar App *.class
+                                cd ../..
+                                if exist build/App.jar echo JAR created successfully
                             '''
                         }
                     }
@@ -162,7 +160,7 @@ pipeline {
                         script {
                             bat '''
                                 echo Running tests...
-                                java -cp build\classes App
+                                java -cp build/classes App
                                 if %ERRORLEVEL% NEQ 0 exit /B 1
                             '''
                         }
@@ -194,7 +192,7 @@ pipeline {
                 script {
                     echo "Feature branch: Running compilation check..."
                     bat '''
-                        javac src\App.java
+                        javac src/App.java
                         if %ERRORLEVEL% NEQ 0 exit /B 1
                         echo Compilation successful
                     '''
