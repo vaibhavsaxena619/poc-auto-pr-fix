@@ -39,10 +39,10 @@ pipeline {
                                            usernameVariable: 'GITHUB_USERNAME', 
                                            passwordVariable: 'GITHUB_PAT')
                         ]) {
-                            bat '''
+                            sh '''
                                 pip install openai requests --quiet
                                 git fetch origin --prune --quiet
-                                python pr_review.py %CHANGE_ID% master %CHANGE_BRANCH%
+                                python pr_review.py ${CHANGE_ID} master ${CHANGE_BRANCH}
                             '''
                         }
                         echo "Code review posted to PR #${env.CHANGE_ID}"
@@ -65,14 +65,14 @@ pipeline {
             steps {
                 script {
                     echo "Main branch: Compiling Java code..."
-                    bat '''
-                        if not exist build mkdir build
+                    sh '''
+                        mkdir -p build
                         javac src/App.java
-                        if %ERRORLEVEL% NEQ 0 (
-                            echo Compilation failed on main branch
-                            exit /B 1
-                        )
-                        echo Compilation successful
+                        if [ $? -ne 0 ]; then
+                            echo "Compilation failed on main branch"
+                            exit 1
+                        fi
+                        echo "Compilation successful"
                     '''
                 }
             }
@@ -94,12 +94,11 @@ pipeline {
                     steps {
                         script {
                             echo "Master: Production compilation..."
-                            bat '''
-                                if not exist build mkdir build
-                                if not exist build/classes mkdir build/classes
+                            sh '''
+                                mkdir -p build/classes
                                 javac -d build/classes src/App.java
-                                if %ERRORLEVEL% NEQ 0 exit /B 1
-                                echo Compilation successful
+                                if [ $? -ne 0 ]; then exit 1; fi
+                                echo "Compilation successful"
                             '''
                         }
                     }
@@ -115,22 +114,22 @@ pipeline {
                                                        usernameVariable: 'GITHUB_USERNAME',
                                                        passwordVariable: 'GITHUB_PAT')
                                     ]) {
-                                        bat '''
-                                            echo Sending error to Azure OpenAI for analysis...
+                                        sh '''
+                                            echo "Sending error to Azure OpenAI for analysis..."
                                             pip install openai --quiet
                                             python build_fix.py src/App.java
                                         '''
                                     }
                                     echo "Retrying compilation after fixes..."
-                                    bat '''
+                                    sh '''
                                         javac -d build/classes src/App.java
-                                        if %ERRORLEVEL% EQU 0 (
-                                            echo Recovery successful - compilation passed
-                                            exit /B 0
-                                        ) else (
-                                            echo Recovery failed - compilation still failing
-                                            exit /B 1
-                                        )
+                                        if [ $? -eq 0 ]; then
+                                            echo "Recovery successful - compilation passed"
+                                            exit 0
+                                        else
+                                            echo "Recovery failed - compilation still failing"
+                                            exit 1
+                                        fi
                                     '''
                                 } catch (Exception e) {
                                     echo "Recovery failed: ${e.message}"
@@ -145,11 +144,11 @@ pipeline {
                 stage('Create JAR') {
                     steps {
                         script {
-                            bat '''
+                            sh '''
                                 cd build/classes
                                 jar cfe ../App.jar App *.class
                                 cd ../..
-                                if exist build/App.jar echo JAR created successfully
+                                if [ -f build/App.jar ]; then echo "JAR created successfully"; fi
                             '''
                         }
                     }
@@ -158,10 +157,10 @@ pipeline {
                 stage('Test') {
                     steps {
                         script {
-                            bat '''
-                                echo Running tests...
+                            sh '''
+                                echo "Running tests..."
                                 java -cp build/classes App
-                                if %ERRORLEVEL% NEQ 0 exit /B 1
+                                if [ $? -ne 0 ]; then exit 1; fi
                             '''
                         }
                     }
@@ -191,10 +190,10 @@ pipeline {
             steps {
                 script {
                     echo "Feature branch: Running compilation check..."
-                    bat '''
+                    sh '''
                         javac src/App.java
-                        if %ERRORLEVEL% NEQ 0 exit /B 1
-                        echo Compilation successful
+                        if [ $? -ne 0 ]; then exit 1; fi
+                        echo "Compilation successful"
                     '''
                 }
             }
