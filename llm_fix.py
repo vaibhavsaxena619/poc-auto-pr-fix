@@ -11,7 +11,7 @@ from google import genai
 # ---------------- CONFIG ----------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-3-flash-preview"
 
 JAVA_FILE = Path("src") / "App.java"
 

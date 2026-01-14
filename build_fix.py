@@ -47,7 +47,7 @@ def send_to_gemini(error_message: str, source_code: str, api_key: str) -> str:
     """Send compilation error to Gemini for analysis and fix."""
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
         
         prompt = f"""You are a Java code expert. A compilation error occurred. 
 Analyze and provide ONLY the corrected code without explanations.

@@ -9,7 +9,7 @@ from google import genai
 # ---------------- CONFIG ----------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-3-flash-preview"
 
 REPO_OWNER = os.getenv("REPO_OWNER", "vaibhavsaxena619")
 REPO_NAME = os.getenv("REPO_NAME", "poc-auto-pr-fix")
