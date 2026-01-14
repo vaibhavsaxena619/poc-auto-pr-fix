@@ -4,12 +4,14 @@ import json
 import subprocess
 import requests
 from pathlib import Path
-from google import genai
+from openai import AzureOpenAI
 
 # ---------------- CONFIG ----------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-5")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
-MODEL_NAME = "gemini-3-flash-preview"
 
 REPO_OWNER = os.getenv("REPO_OWNER", "vaibhavsaxena619")
 REPO_NAME = os.getenv("REPO_NAME", "poc-auto-pr-fix")
@@ -34,10 +36,10 @@ def get_pr_diff(base_branch: str, head_branch: str) -> str:
     diff = run_git_command(["git", "diff", f"origin/{base_branch}...origin/{head_branch}"])
     return diff
 
-def call_gemini_for_review(diff_content: str, review_type: str = "code_review", pr_info: dict = None) -> str:
-    """Call Gemini for code review or merge conflict analysis"""
-    if not GEMINI_API_KEY:
-        fail("GEMINI_API_KEY not set")
+def call_azure_openai_for_review(diff_content: str, review_type: str = "code_review", pr_info: dict = None) -> str:
+    """Call Azure OpenAI for code review or merge conflict analysis"""
+    if not AZURE_OPENAI_API_KEY or not AZURE_OPENAI_ENDPOINT:
+        fail("AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT not set")
     
     if review_type == "code_review":
         prompt = f"""
@@ -161,12 +163,21 @@ The automated code review system experienced technical difficulties while analyz
 *🤖 Automated message from Jenkins CI/CD Pipeline*"""
     
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt
+        client = AzureOpenAI(
+            api_key=AZURE_OPENAI_API_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT
         )
-        return response.text if response.text else "No review generated"
+        response = client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT_NAME,
+            messages=[
+                {"role": "system", "content": "You are a professional code reviewer for Java projects."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=2000
+        )
+        return response.choices[0].message.content if response.choices else "No review generated"
     except Exception as e:
         return f"""## ❌ Code Review Failed
 
@@ -328,8 +339,8 @@ No code changes found between `{base_branch}` and `{head_branch}` branches.
     print(f"[pr-review] Found {len(diff_content.splitlines())} lines of changes")
     
     # Generate review with PR context
-    print(f"[pr-review] Generating {review_type} analysis with Gemini AI...")
-    review_content = call_gemini_for_review(diff_content, review_type, pr_info)
+    print(f"[pr-review] Generating {review_type} analysis with Azure OpenAI...")
+    review_content = call_azure_openai_for_review(diff_content, review_type, pr_info)
     
     # Post comprehensive review comment
     success = post_github_comment(pr_number, review_content, pr_info)
@@ -337,6 +348,7 @@ No code changes found between `{base_branch}` and `{head_branch}` branches.
     if success:
         print(f"[pr-review] ✅ {review_type.replace('_', ' ').title()} completed and posted to PR #{pr_number}")
         print(f"[pr-review] 📝 Author @{pr_info.get('author', 'unknown')} has been notified")
+        print("[pr-review] 🤖 Review powered by Azure OpenAI (gpt-5)")
         print("[pr-review] 🔗 Check the PR on GitHub for the full review")
     else:
         print(f"[pr-review] ⚠️ {review_type.replace('_', ' ').title()} completed but failed to post comment")

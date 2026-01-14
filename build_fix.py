@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build failure recovery script - Analyzes compilation errors and applies fixes via Gemini AI.
+Build failure recovery script - Analyzes compilation errors and applies fixes via Azure OpenAI.
 Production-ready error handling with comprehensive logging.
 """
 
@@ -12,9 +12,9 @@ from pathlib import Path
 from datetime import datetime
 
 try:
-    import google.generativeai as genai
+    from openai import AzureOpenAI
 except ImportError:
-    print("ERROR: google-genai not installed. Run: pip install google-genai")
+    print("ERROR: openai not installed. Run: pip install openai")
     sys.exit(1)
 
 
@@ -43,11 +43,14 @@ def read_source_file(source_file: str) -> str:
         sys.exit(1)
 
 
-def send_to_gemini(error_message: str, source_code: str, api_key: str) -> str:
-    """Send compilation error to Gemini for analysis and fix."""
+def send_to_azure_openai(error_message: str, source_code: str, api_key: str, endpoint: str, api_version: str, deployment_name: str) -> str:
+    """Send compilation error to Azure OpenAI for analysis and fix."""
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-3-flash-preview")
+        client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=endpoint
+        )
         
         prompt = f"""You are a Java code expert. A compilation error occurred. 
 Analyze and provide ONLY the corrected code without explanations.
@@ -60,10 +63,18 @@ CURRENT CODE:
 
 RESPONSE: Provide only the corrected Java code that fixes this error. No explanations."""
         
-        response = model.generate_content(prompt)
-        return response.text.strip()
+        response = client.chat.completions.create(
+            model=deployment_name,
+            messages=[
+                {"role": "system", "content": "You are a Java code expert that fixes compilation errors."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=2000
+        )
+        return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"ERROR: Gemini API failed: {e}")
+        print(f"ERROR: Azure OpenAI API failed: {e}")
         return ""
 
 
@@ -117,10 +128,13 @@ def main():
         sys.exit(1)
     
     source_file = sys.argv[1]
-    api_key = os.getenv('GEMINI_API_KEY')
+    api_key = os.getenv('AZURE_OPENAI_API_KEY')
+    endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+    api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2024-12-01-preview')
+    deployment_name = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-5')
     
-    if not api_key:
-        print("ERROR: GEMINI_API_KEY environment variable not set")
+    if not api_key or not endpoint:
+        print("ERROR: AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT environment variables not set")
         sys.exit(1)
     
     if not os.path.exists(source_file):
@@ -140,12 +154,12 @@ def main():
     # Read current source
     source_code = read_source_file(source_file)
     
-    # Send to Gemini for fix
-    print("Sending error to Gemini AI for analysis...")
-    fixed_code = send_to_gemini(error_msg, source_code, api_key)
+    # Send to Azure OpenAI for fix
+    print("Sending error to Azure OpenAI for analysis...")
+    fixed_code = send_to_azure_openai(error_msg, source_code, api_key, endpoint, api_version, deployment_name)
     
     if not fixed_code:
-        print("ERROR: Gemini failed to generate fix")
+        print("ERROR: Azure OpenAI failed to generate fix")
         sys.exit(1)
     
     # Apply fix

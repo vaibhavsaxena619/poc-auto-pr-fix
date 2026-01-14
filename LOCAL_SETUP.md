@@ -31,19 +31,25 @@ Keep these files in your local environment only. They are listed in `.gitignore`
 
 ### 1. Install Python Dependencies
 ```bash
-pip install google-genai requests
+pip install openai requests
 ```
 
 ### 2. Set Environment Variables (for testing locally)
 ```bash
 # Windows PowerShell
-$env:GEMINI_API_KEY = "your-gemini-api-key"
+$env:AZURE_OPENAI_API_KEY = "your-azure-openai-api-key"
+$env:AZURE_OPENAI_ENDPOINT = "https://your-resource.cognitiveservices.azure.com/"
+$env:AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
+$env:AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-5"
 $env:GITHUB_PAT = "your-github-pat"
 $env:REPO_OWNER = "vaibhavsaxena619"
 $env:REPO_NAME = "poc-auto-pr-fix"
 
 # Or in Windows CMD
-set GEMINI_API_KEY=your-gemini-api-key
+set AZURE_OPENAI_API_KEY=your-azure-openai-api-key
+set AZURE_OPENAI_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
+set AZURE_OPENAI_API_VERSION=2024-12-01-preview
+set AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5
 set GITHUB_PAT=your-github-pat
 ```
 
@@ -65,7 +71,7 @@ load_dotenv()
 
 ### 4. Configure Jenkins (Production)
 See `JENKINS_CREDENTIALS.md` for:
-- Creating Jenkins credentials
+- Creating Jenkins credentials for Azure OpenAI
 - Setting credential IDs
 - Configuring GitHub webhook
 

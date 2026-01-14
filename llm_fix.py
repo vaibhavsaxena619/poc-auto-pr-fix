@@ -6,12 +6,14 @@ import subprocess
 from pathlib import Path
 import difflib
 import os
-from google import genai
+from openai import AzureOpenAI
 
 # ---------------- CONFIG ----------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-5")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
-MODEL_NAME = "gemini-3-flash-preview"
 
 JAVA_FILE = Path("src") / "App.java"
 
@@ -136,9 +138,9 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
-def call_gemini(errors: str) -> str:
-    if not GEMINI_API_KEY:
-        fail("GEMINI_API_KEY environment variable not set. Get your API key from: https://aistudio.google.com/app/apikey")
+def call_azure_openai(errors: str) -> str:
+    if not AZURE_OPENAI_API_KEY or not AZURE_OPENAI_ENDPOINT:
+        fail("AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT environment variables not set.")
     
     prompt = f"""
 You are fixing Java compilation errors in a CI pipeline.
@@ -160,30 +162,41 @@ Compilation errors:
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            print(f"[llm-fix] Gemini attempt {attempt}/{MAX_RETRIES}...")
+            print(f"[llm-fix] Azure OpenAI attempt {attempt}/{MAX_RETRIES}...")
             
-            # Create the client with API key
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            
-            # Generate content using the new API
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt
+            # Create the client with Azure credentials
+            client = AzureOpenAI(
+                api_key=AZURE_OPENAI_API_KEY,
+                api_version=AZURE_OPENAI_API_VERSION,
+                azure_endpoint=AZURE_OPENAI_ENDPOINT
             )
             
-            if response.text:
-                return response.text
+            # Call Azure OpenAI API
+            response = client.chat.completions.create(
+                model=AZURE_OPENAI_DEPLOYMENT_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a Java code expert that fixes compilation errors."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=2000
+            )
+            
+            if response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content
             else:
-                raise Exception(f"No response text from Gemini: {response}")
+                raise Exception(f"No response content from Azure OpenAI: {response}")
                     
         except Exception as e:
             last_error = e
-            print(f"[llm-fix] Gemini attempt {attempt} failed: {e}")
+            print(f"[llm-fix] Azure OpenAI attempt {attempt} failed: {e}")
             if attempt < MAX_RETRIES:
                 print(f"[llm-fix] Retrying in {RETRY_DELAY_SECONDS}s...")
                 time.sleep(RETRY_DELAY_SECONDS)
 
-    fail(f"Gemini failed after {MAX_RETRIES} attempts: {last_error}")
+    fail(f"Azure OpenAI failed after {MAX_RETRIES} attempts: {last_error}")
+
+
 
 
 def strip_comments(code: str) -> str:
@@ -262,8 +275,8 @@ if __name__ == "__main__":
 
     original_code = read_text(JAVA_FILE)
 
-    print("[llm-fix] Sending errors to Gemini...")
-    raw = call_gemini(errors)
+    print("[llm-fix] Sending errors to Azure OpenAI...")
+    raw = call_azure_openai(errors)
 
     print("[llm-fix] Extracting App class...")
     java_code = extract_app_class(raw)

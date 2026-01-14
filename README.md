@@ -1,12 +1,12 @@
-# Java CI/CD Automation with Gemini AI
+# Java CI/CD Automation with Azure OpenAI
 
-Enterprise-grade Jenkins pipeline with automated code review and build error recovery powered by Google Gemini AI.
+Enterprise-grade Jenkins pipeline with automated code review and build error recovery powered by Microsoft Azure OpenAI.
 
 ## Project Overview
 
 This project implements a production-ready CI/CD automation system for Java applications with:
-- **PR Code Review:** Automated AI-powered code analysis for pull requests to master
-- **Master Build Recovery:** Automatic error detection and repair using Gemini AI
+- **PR Code Review:** Automated AI-powered code analysis for pull requests to master using Azure OpenAI
+- **Master Build Recovery:** Automatic error detection and repair using Azure OpenAI
 - **Branch-Specific Workflows:** Tailored pipelines for main, master, and feature branches
 - **GitHub Integration:** Seamless PR commenting and commit operations
 
@@ -137,11 +137,12 @@ For a **5-minute setup**, see [docs/QUICKSTART.md](docs/QUICKSTART.md)
 - Java compiler (javac) installed
 - Python 3.8+
 - Git installed
+- Azure OpenAI resource configured
 
 ### 1. Install Dependencies
 
 ```bash
-pip install google-genai requests
+pip install openai requests
 ```
 
 ### 2. Configure Jenkins Credentials

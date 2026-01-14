@@ -31,13 +31,16 @@ pipeline {
                 script {
                     try {
                         withCredentials([
-                            string(credentialsId: 'GEMINI_API_KEY_CREDENTIAL', variable: 'GEMINI_API_KEY'),
+                            string(credentialsId: 'AZURE_OPENAI_API_KEY_CREDENTIAL', variable: 'AZURE_OPENAI_API_KEY'),
+                            string(credentialsId: 'AZURE_OPENAI_ENDPOINT_CREDENTIAL', variable: 'AZURE_OPENAI_ENDPOINT'),
                             usernamePassword(credentialsId: 'GITHUB_PAT_CREDENTIAL', 
                                            usernameVariable: 'GITHUB_USERNAME', 
                                            passwordVariable: 'GITHUB_PAT')
                         ]) {
                             bat '''
-                                pip install google-genai requests --quiet
+                                pip install openai requests --quiet
+                                set AZURE_OPENAI_API_VERSION=2024-12-01-preview
+                                set AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5
                                 git fetch origin --prune --quiet
                                 python pr_review.py %CHANGE_ID% master %CHANGE_BRANCH%
                             '''
@@ -103,17 +106,20 @@ pipeline {
                     post {
                         failure {
                             script {
-                                echo "Compilation failed - attempting recovery via Gemini..."
+                                echo "Compilation failed - attempting recovery via Azure OpenAI..."
                                 try {
                                     withCredentials([
-                                        string(credentialsId: 'GEMINI_API_KEY_CREDENTIAL', variable: 'GEMINI_API_KEY'),
+                                        string(credentialsId: 'AZURE_OPENAI_API_KEY_CREDENTIAL', variable: 'AZURE_OPENAI_API_KEY'),
+                                        string(credentialsId: 'AZURE_OPENAI_ENDPOINT_CREDENTIAL', variable: 'AZURE_OPENAI_ENDPOINT'),
                                         usernamePassword(credentialsId: 'GITHUB_PAT_CREDENTIAL',
                                                        usernameVariable: 'GITHUB_USERNAME',
                                                        passwordVariable: 'GITHUB_PAT')
                                     ]) {
                                         bat '''
-                                            echo Sending error to Gemini for analysis...
-                                            pip install google-genai --quiet
+                                            echo Sending error to Azure OpenAI for analysis...
+                                            set AZURE_OPENAI_API_VERSION=2024-12-01-preview
+                                            set AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5
+                                            pip install openai --quiet
                                             python build_fix.py src\App.java
                                         '''
                                     }
