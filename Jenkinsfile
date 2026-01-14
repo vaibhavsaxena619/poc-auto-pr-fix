@@ -1,6 +1,10 @@
 pipeline {
     agent any
     
+    tools {
+        git 'Default'
+    }
+    
     environment {
         BRANCH_NAME = "${env.GIT_BRANCH?.replace('origin/', '') ?: 'unknown'}"
         AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
