@@ -179,7 +179,7 @@ Compilation errors:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
-                max_tokens=2000
+                max_completion_tokens=2000
             )
             
             if response.choices and response.choices[0].message.content:

@@ -70,7 +70,7 @@ RESPONSE: Provide only the corrected Java code that fixes this error. No explana
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            max_tokens=2000
+            max_completion_tokens=2000
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
