@@ -57,8 +57,8 @@ pipeline {
                                 ]) {
                                     sh '''
                                         echo "Sending compilation error to GPT-5 for analysis..."
-                                        pip install openai requests --quiet
-                                        python build_fix.py src/App.java
+                                        pip3 install openai requests --quiet
+                                        python3 build_fix.py src/App.java
                                     '''
                                 }
                                 
@@ -89,9 +89,9 @@ pipeline {
                                                passwordVariable: 'GITHUB_PAT')
                             ]) {
                                 sh '''
-                                    pip install openai requests --quiet
+                                    pip3 install openai requests --quiet
                                     git fetch origin --prune --quiet
-                                    python pr_review.py ${CHANGE_ID} master ${CHANGE_BRANCH}
+                                    python3 pr_review.py ${CHANGE_ID} master ${CHANGE_BRANCH}
                                 '''
                             }
                             echo "Code review completed for PR #${env.CHANGE_ID}"
@@ -139,8 +139,8 @@ pipeline {
                                     ]) {
                                         sh '''
                                             echo "Sending error to Azure OpenAI for analysis..."
-                                            pip install openai --quiet
-                                            python build_fix.py src/App.java
+                                            pip3 install openai --quiet
+                                            python3 build_fix.py src/App.java
                                         '''
                                     }
                                     echo "Retrying compilation after fixes..."
