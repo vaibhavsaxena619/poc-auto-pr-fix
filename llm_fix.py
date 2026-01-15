@@ -178,7 +178,6 @@ Compilation errors:
                     {"role": "system", "content": "You are a Java code expert that fixes compilation errors."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
                 max_completion_tokens=2000
             )
             

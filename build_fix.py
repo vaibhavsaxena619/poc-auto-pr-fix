@@ -69,7 +69,6 @@ RESPONSE: Provide only the corrected Java code that fixes this error. No explana
                 {"role": "system", "content": "You are a Java code expert that fixes compilation errors."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
             max_completion_tokens=2000
         )
         return response.choices[0].message.content.strip()
