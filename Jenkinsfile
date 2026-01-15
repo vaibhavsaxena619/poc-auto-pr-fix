@@ -57,7 +57,7 @@ pipeline {
                                 ]) {
                                     sh '''
                                         echo "Sending compilation error to GPT-5 for analysis..."
-                                        pip3 install openai requests --quiet
+                                        pip3 install openai requests --quiet --break-system-packages
                                         python3 build_fix.py src/App.java
                                     '''
                                 }
@@ -89,7 +89,7 @@ pipeline {
                                                passwordVariable: 'GITHUB_PAT')
                             ]) {
                                 sh '''
-                                    pip3 install openai requests --quiet
+                                    pip3 install openai requests --quiet --break-system-packages
                                     git fetch origin --prune --quiet
                                     python3 pr_review.py ${CHANGE_ID} master ${CHANGE_BRANCH}
                                 '''
@@ -139,7 +139,7 @@ pipeline {
                                     ]) {
                                         sh '''
                                             echo "Sending error to Azure OpenAI for analysis..."
-                                            pip3 install openai --quiet
+                                            pip3 install openai --quiet --break-system-packages
                                             python3 build_fix.py src/App.java
                                         '''
                                     }
