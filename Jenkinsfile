@@ -49,9 +49,9 @@ pipeline {
                                 env.COMPILATION_SUCCESS = 'false'
                                 
                                 withCredentials([
-                                    string(credentialsId: 'AZURE_OPENAI_API_KEY_CREDENTIAL', variable: 'AZURE_OPENAI_API_KEY'),
-                                    string(credentialsId: 'AZURE_OPENAI_ENDPOINT_CREDENTIAL', variable: 'AZURE_OPENAI_ENDPOINT'),
-                                    usernamePassword(credentialsId: 'GITHUB_PAT_CREDENTIAL',
+                                    string(credentialsId: 'AZURE_OPENAI_API_KEY', variable: 'AZURE_OPENAI_API_KEY'),
+                                    string(credentialsId: 'AZURE_OPENAI_ENDPOINT', variable: 'AZURE_OPENAI_ENDPOINT'),
+                                    usernamePassword(credentialsId: 'GITHUB_PAT',
                                                    usernameVariable: 'GITHUB_USERNAME',
                                                    passwordVariable: 'GITHUB_PAT')
                                 ]) {
@@ -82,9 +82,9 @@ pipeline {
                     steps {
                         script {
                             withCredentials([
-                                string(credentialsId: 'AZURE_OPENAI_API_KEY_CREDENTIAL', variable: 'AZURE_OPENAI_API_KEY'),
-                                string(credentialsId: 'AZURE_OPENAI_ENDPOINT_CREDENTIAL', variable: 'AZURE_OPENAI_ENDPOINT'),
-                                usernamePassword(credentialsId: 'GITHUB_PAT_CREDENTIAL',
+                                string(credentialsId: 'AZURE_OPENAI_API_KEY', variable: 'AZURE_OPENAI_API_KEY'),
+                                string(credentialsId: 'AZURE_OPENAI_ENDPOINT', variable: 'AZURE_OPENAI_ENDPOINT'),
+                                usernamePassword(credentialsId: 'GITHUB_PAT',
                                                usernameVariable: 'GITHUB_USERNAME',
                                                passwordVariable: 'GITHUB_PAT')
                             ]) {
@@ -131,9 +131,9 @@ pipeline {
                                 echo "Compilation failed - attempting recovery via Azure OpenAI..."
                                 try {
                                     withCredentials([
-                                        string(credentialsId: 'AZURE_OPENAI_API_KEY_CREDENTIAL', variable: 'AZURE_OPENAI_API_KEY'),
-                                        string(credentialsId: 'AZURE_OPENAI_ENDPOINT_CREDENTIAL', variable: 'AZURE_OPENAI_ENDPOINT'),
-                                        usernamePassword(credentialsId: 'GITHUB_PAT_CREDENTIAL',
+                                        string(credentialsId: 'AZURE_OPENAI_API_KEY', variable: 'AZURE_OPENAI_API_KEY'),
+                                        string(credentialsId: 'AZURE_OPENAI_ENDPOINT', variable: 'AZURE_OPENAI_ENDPOINT'),
+                                        usernamePassword(credentialsId: 'GITHUB_PAT',
                                                        usernameVariable: 'GITHUB_USERNAME',
                                                        passwordVariable: 'GITHUB_PAT')
                                     ]) {
