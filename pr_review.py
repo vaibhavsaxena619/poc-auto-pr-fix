@@ -62,7 +62,7 @@ REVIEW REQUIREMENTS:
 
 RESPONSE FORMAT:
 ## 🔍 Code Review Summary
-**Overall Rating:** [Rating] | **Reviewer:** Gemini AI
+**Overall Rating:** [Rating] | **Reviewer:** Azure OpenAI GPT-5
 
 ## ✅ Positive Points:
 - [List good practices and well-written code sections]
@@ -150,7 +150,7 @@ The automated code review system experienced technical difficulties while analyz
 3. **Verify Compilation** - Make sure code compiles without errors
 
 **What was attempted:**
-- Gemini AI code analysis
+- Azure OpenAI GPT-5 code analysis
 - Automated security scanning
 - Best practice validation
 
@@ -228,7 +228,7 @@ def post_github_comment(pr_number: int, comment: str, pr_info: dict = None):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
     enhanced_comment += f"""
 ---
-*🤖 Automated review by Jenkins PR Review Bot using Gemini AI*  
+*🤖 Automated review by Jenkins PR Review Bot using Azure OpenAI GPT-5*  
 *Generated on: {timestamp}*
 *Job: Jenkins Multibranch Pipeline*"""
     

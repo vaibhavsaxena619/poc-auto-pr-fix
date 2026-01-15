@@ -154,6 +154,9 @@ pipeline {
                                             exit 1
                                         fi
                                     '''
+                                    // Mark build as SUCCESS if recovery compilation passed
+                                    currentBuild.result = 'SUCCESS'
+                                    echo "Build recovery completed successfully"
                                 } catch (Exception e) {
                                     echo "Recovery failed: ${e.message}"
                                     currentBuild.result = 'FAILURE'

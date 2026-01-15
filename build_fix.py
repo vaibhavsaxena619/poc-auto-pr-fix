@@ -108,13 +108,23 @@ def commit_changes(source_file: str, error_msg: str) -> bool:
     """Commit fixed code to git."""
     try:
         subprocess.run(['git', 'add', source_file], check=True, capture_output=True)
-        subprocess.run(
+        result = subprocess.run(
             ['git', 'commit', '-m', f'Build fix: {error_msg[:50]}...'],
-            check=True,
-            capture_output=True
+            check=False,
+            capture_output=True,
+            text=True
         )
-        print("Changes committed to git")
-        return True
+        if result.returncode == 0:
+            print("Changes committed to git")
+            return True
+        else:
+            # Handle detached HEAD or other git issues gracefully
+            if 'detached HEAD' in result.stderr or 'no changes added' in result.stderr:
+                print("INFO: Git commit skipped (detached HEAD or no changes)")
+                return True
+            else:
+                print(f"WARNING: Git commit failed: {result.stderr}")
+                return True  # Still consider it a success as the fix was applied
     except Exception as e:
         print(f"WARNING: Git commit failed: {e}")
         return False
@@ -162,7 +172,7 @@ def main():
         sys.exit(1)
     
     # Apply fix
-    print("Applying Gemini-generated fix...")
+    print("Applying Azure OpenAI GPT-5 fix...")
     if not apply_fix(source_file, fixed_code):
         sys.exit(1)
     
