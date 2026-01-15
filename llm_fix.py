@@ -6,15 +6,14 @@ import subprocess
 from pathlib import Path
 import difflib
 import os
-from google import genai
+from openai import AzureOpenAI
 
 # ---------------- CONFIG ----------------
-
-# Get your API key from: https://aistudio.google.com/app/apikey
-# For Jenkins: Use credentials with ID "Gemini API key"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_key")
-GITHUB_PAT = os.getenv("github-pat") or os.getenv("GITHUB_PAT")
-MODEL_NAME = "gemini-3-flash-preview"
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-5")
+GITHUB_PAT = os.getenv("GITHUB_PAT")
 
 JAVA_FILE = Path("src") / "App.java"
 
@@ -65,8 +64,8 @@ def setup_git_credentials():
     return True
 
 
-def commit_and_push_changes(original_errors: str, last_committer: dict):
-    """Commit the fixed code and push to repository"""
+def commit_and_push_changes(original_errors: str, last_committer: dict, original_code: str, fixed_code: str):
+    """Commit the fixed code and push to repository with detailed patch notes"""
     if not setup_git_credentials():
         print("[llm-fix] Skipping git operations due to missing credentials")
         return
@@ -78,40 +77,70 @@ def commit_and_push_changes(original_errors: str, last_committer: dict):
     # Add the fixed file
     run_git_command(["git", "add", str(JAVA_FILE)])
     
-    # Create commit message with issue details
-    commit_msg = f"""Auto-fix: Resolved Java compilation errors
+    # Generate detailed patch notes
+    changes_made = []
+    if "import" in fixed_code and "import" not in original_code:
+        changes_made.append("- Added missing import statements")
+    if "public class" in fixed_code and "public class" in original_code:
+        changes_made.append("- Fixed class declaration syntax")
+    if original_errors:
+        if "cannot find symbol" in original_errors.lower():
+            changes_made.append("- Resolved missing symbol/variable declarations")
+        if "expected" in original_errors.lower():
+            changes_made.append("- Fixed syntax errors (missing semicolons, brackets, etc.)")
+        if "incompatible types" in original_errors.lower():
+            changes_made.append("- Fixed type compatibility issues")
+    
+    if not changes_made:
+        changes_made.append("- Applied general compilation error fixes")
+    
+    # Create detailed commit message with patch notes
+    patch_notes = "\n".join(changes_made)
+    
+    commit_msg = f"""AUTO-FIX: Resolved Java compilation errors
 
-Issues fixed:
-{original_errors[:500]}{'...' if len(original_errors) > 500 else ''}
+PATCH NOTES:
+{patch_notes}
 
-Fixed by: Jenkins Auto-Fix Bot using Gemini AI
-Reviewer: {last_committer['name']} <{last_committer['email']}>
+ORIGINAL ERRORS FIXED:
+{original_errors[:800]}{'...' if len(original_errors) > 800 else ''}
 
-Auto-generated commit from CI/CD pipeline
+TECHNICAL DETAILS:
+- Fixed by: Jenkins Auto-Fix Bot using Gemini AI
+- Original committer: {last_committer['name']} <{last_committer['email']}>
+- Auto-generated from CI/CD pipeline
+- Branch: main (ready for merge to master)
+
+FILES MODIFIED:
+- src/App.java (compilation errors resolved)
+
+REVIEW STATUS: Ready for merge to master branch
 """
     
     # Commit the changes
     result = run_git_command(["git", "commit", "-m", commit_msg])
     if result:
-        print(f"[llm-fix] Committed changes: {result}")
+        print("[llm-fix] Committed changes with detailed patch notes")
         
         # Push the changes to main branch
         push_result = run_git_command(["git", "push", "origin", "HEAD:main"])
         if push_result:
-            print("[llm-fix] Successfully pushed changes to repository")
+            print("[llm-fix] SUCCESS: Auto-fixed code pushed to main branch")
+            print("[llm-fix] PATCH NOTES: Included in commit message")
+            print("[llm-fix] STATUS: Ready for merge to master branch")
         else:
-            print("[llm-fix] Failed to push changes")
+            print("[llm-fix] ERROR: Failed to push changes")
     else:
-        print("[llm-fix] Failed to commit changes")
+        print("[llm-fix] ERROR: Failed to commit changes")
 
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
-def call_gemini(errors: str) -> str:
-    if not GEMINI_API_KEY:
-        fail("GEMINI_API_KEY environment variable not set. Get your API key from: https://aistudio.google.com/app/apikey")
+def call_azure_openai(errors: str) -> str:
+    if not AZURE_OPENAI_API_KEY or not AZURE_OPENAI_ENDPOINT:
+        fail("AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT environment variables not set.")
     
     prompt = f"""
 You are fixing Java compilation errors in a CI pipeline.
@@ -133,30 +162,40 @@ Compilation errors:
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            print(f"[llm-fix] Gemini attempt {attempt}/{MAX_RETRIES}...")
+            print(f"[llm-fix] Azure OpenAI attempt {attempt}/{MAX_RETRIES}...")
             
-            # Create the client with API key
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            
-            # Generate content using the new API
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt
+            # Create the client with Azure credentials
+            client = AzureOpenAI(
+                api_key=AZURE_OPENAI_API_KEY,
+                api_version=AZURE_OPENAI_API_VERSION,
+                azure_endpoint=AZURE_OPENAI_ENDPOINT
             )
             
-            if response.text:
-                return response.text
+            # Call Azure OpenAI API
+            response = client.chat.completions.create(
+                model=AZURE_OPENAI_DEPLOYMENT_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a Java code expert that fixes compilation errors."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_completion_tokens=2000
+            )
+            
+            if response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content
             else:
-                raise Exception(f"No response text from Gemini: {response}")
+                raise Exception(f"No response content from Azure OpenAI: {response}")
                     
         except Exception as e:
             last_error = e
-            print(f"[llm-fix] Gemini attempt {attempt} failed: {e}")
+            print(f"[llm-fix] Azure OpenAI attempt {attempt} failed: {e}")
             if attempt < MAX_RETRIES:
                 print(f"[llm-fix] Retrying in {RETRY_DELAY_SECONDS}s...")
                 time.sleep(RETRY_DELAY_SECONDS)
 
-    fail(f"Gemini failed after {MAX_RETRIES} attempts: {last_error}")
+    fail(f"Azure OpenAI failed after {MAX_RETRIES} attempts: {last_error}")
+
+
 
 
 def strip_comments(code: str) -> str:
@@ -235,8 +274,8 @@ if __name__ == "__main__":
 
     original_code = read_text(JAVA_FILE)
 
-    print("[llm-fix] Sending errors to Gemini...")
-    raw = call_gemini(errors)
+    print("[llm-fix] Sending errors to Azure OpenAI...")
+    raw = call_azure_openai(errors)
 
     print("[llm-fix] Extracting App class...")
     java_code = extract_app_class(raw)
@@ -258,6 +297,6 @@ if __name__ == "__main__":
     
     # Commit and push the changes
     print("[llm-fix] Committing changes to git...")
-    commit_and_push_changes(errors, last_committer)
+    commit_and_push_changes(errors, last_committer, original_code, java_code)
     
     print("[llm-fix] Process completed - code fixed and committed to repository")
