@@ -271,7 +271,7 @@ def verify_fix(source_file: str) -> bool:
 
 
 def commit_changes(source_file: str, error_msg: str) -> bool:
-    """Commit fixed code to git."""
+    """Commit and push fixed code to git."""
     try:
         # Configure git user if not already configured (for Jenkins environments)
         subprocess.run(['git', 'config', 'user.email', 'build-automation@jenkins.local'], 
@@ -288,7 +288,22 @@ def commit_changes(source_file: str, error_msg: str) -> bool:
         )
         if result.returncode == 0:
             print("✓ Changes committed to git")
-            return True
+            
+            # === PUSH TO REMOTE ===
+            push_result = subprocess.run(
+                ['git', 'push', 'origin', 'HEAD'],
+                check=False,
+                capture_output=True,
+                text=True
+            )
+            
+            if push_result.returncode == 0:
+                print("✓ Changes pushed to remote repository")
+                return True
+            else:
+                print(f"WARNING: Git push failed: {push_result.stderr}")
+                # Still consider commit success even if push fails
+                return True
         else:
             # Handle detached HEAD or other git issues gracefully
             if 'detached HEAD' in result.stderr or 'no changes added' in result.stderr:
@@ -298,7 +313,7 @@ def commit_changes(source_file: str, error_msg: str) -> bool:
                 print(f"WARNING: Git commit failed: {result.stderr}")
                 return True  # Still consider it a success as the fix was applied
     except Exception as e:
-        print(f"WARNING: Git commit failed: {e}")
+        print(f"WARNING: Git commit/push failed: {e}")
         return False
 
 
