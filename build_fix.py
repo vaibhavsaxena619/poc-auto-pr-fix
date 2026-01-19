@@ -247,6 +247,12 @@ def verify_fix(source_file: str) -> bool:
 def commit_changes(source_file: str, error_msg: str) -> bool:
     """Commit fixed code to git."""
     try:
+        # Configure git user if not already configured (for Jenkins environments)
+        subprocess.run(['git', 'config', 'user.email', 'build-automation@jenkins.local'], 
+                      check=False, capture_output=True)
+        subprocess.run(['git', 'config', 'user.name', 'Build Automation (GPT-5)'], 
+                      check=False, capture_output=True)
+        
         subprocess.run(['git', 'add', source_file], check=True, capture_output=True)
         result = subprocess.run(
             ['git', 'commit', '-m', f'Build fix: {error_msg[:50]}...'],
@@ -255,7 +261,7 @@ def commit_changes(source_file: str, error_msg: str) -> bool:
             text=True
         )
         if result.returncode == 0:
-            print("Changes committed to git")
+            print("✓ Changes committed to git")
             return True
         else:
             # Handle detached HEAD or other git issues gracefully
