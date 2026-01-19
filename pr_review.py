@@ -51,6 +51,185 @@ def get_pr_diff(base_branch: str, head_branch: str) -> str:
     
     return diff
 
+
+def check_code_quality(diff_content: str) -> dict:
+    """Analyze code quality issues in the diff"""
+    issues = {
+        'formatting': [],
+        'spelling': [],
+        'bad_practices': []
+    }
+    
+    lines = diff_content.split('\n')
+    
+    for line_num, line in enumerate(lines):
+        # Only check added/modified lines (start with +, not +++)
+        if not line.startswith('+') or line.startswith('+++'):
+            continue
+        
+        content = line[1:]  # Remove the + prefix
+        
+        # ===== CHECK 1: Formatting Issues =====
+        # Check for trailing whitespace
+        if content.rstrip() != content:
+            issues['formatting'].append({
+                'type': 'trailing_whitespace',
+                'line': content[:80],
+                'severity': 'minor'
+            })
+        
+        # Check for inconsistent indentation (tabs vs spaces)
+        if '\t' in content and '    ' in content:
+            issues['formatting'].append({
+                'type': 'mixed_indentation',
+                'line': content[:80],
+                'severity': 'major'
+            })
+        
+        # Check for lines that are too long (>120 chars)
+        if len(content.rstrip()) > 120:
+            issues['formatting'].append({
+                'type': 'line_too_long',
+                'line': content[:80],
+                'length': len(content.rstrip()),
+                'severity': 'minor'
+            })
+        
+        # ===== CHECK 2: Bad Practices =====
+        # Check for common Java bad practices
+        content_lower = content.lower()
+        
+        # Unused import detection
+        if 'import ' in content and ';' in content:
+            issues['bad_practices'].append({
+                'type': 'potential_unused_import',
+                'line': content.strip()[:80],
+                'suggestion': 'Verify this import is actually used in the code',
+                'severity': 'minor'
+            })
+        
+        # Deprecated method usage
+        deprecated_methods = ['getDate', 'getMonth', 'getYear', 'setDate', 'setMonth', 'setYear']
+        for method in deprecated_methods:
+            if method in content:
+                issues['bad_practices'].append({
+                    'type': 'deprecated_method',
+                    'method': method,
+                    'line': content.strip()[:80],
+                    'suggestion': f'Consider using Calendar or LocalDate instead of {method}',
+                    'severity': 'major'
+                })
+        
+        # Unsafe casting
+        if '(Object)' in content or '((Object)' in content:
+            issues['bad_practices'].append({
+                'type': 'unsafe_cast',
+                'line': content.strip()[:80],
+                'suggestion': 'Consider using instanceof checks before casting',
+                'severity': 'major'
+            })
+        
+        # Missing null checks
+        if '.get(' in content and 'null' not in content and 'Optional' not in content:
+            if any(word in content for word in ['HashMap', '.get(', '.getOrDefault', '.getValue']):
+                issues['bad_practices'].append({
+                    'type': 'potential_null_pointer',
+                    'line': content.strip()[:80],
+                    'suggestion': 'Consider null-checking or using Optional',
+                    'severity': 'major'
+                })
+        
+        # Empty catch blocks
+        if 'catch' in content and 'catch(Exception e)' in content:
+            issues['bad_practices'].append({
+                'type': 'empty_catch_block',
+                'line': content.strip()[:80],
+                'suggestion': 'Avoid empty catch blocks - log or handle the exception',
+                'severity': 'major'
+            })
+        
+        # ===== CHECK 3: Spelling & Grammar in Comments =====
+        if '//' in content or '/*' in content or '*' in content:
+            comment_part = content.split('//')[1] if '//' in content else content
+            
+            # Common typos
+            typos = {
+                'recieve': 'receive',
+                'occured': 'occurred',
+                'seperator': 'separator',
+                'succesfully': 'successfully',
+                'coordiante': 'coordinate',
+                'adress': 'address',
+                'sturcture': 'structure',
+                'lenght': 'length'
+            }
+            
+            for typo, correct in typos.items():
+                if typo in comment_part.lower():
+                    issues['spelling'].append({
+                        'type': 'spelling_error',
+                        'word': typo,
+                        'suggestion': f'Did you mean "{correct}"?',
+                        'line': comment_part.strip()[:80],
+                        'severity': 'minor'
+                    })
+    
+    return issues
+
+
+def format_quality_report(quality_issues: dict) -> str:
+    """Format code quality issues into a readable report"""
+    if not any(quality_issues.values()):
+        return "\n### ✅ Code Quality Check: PASSED\nNo formatting, spelling, or practice issues detected."
+    
+    report = "\n### 🔧 Code Quality Analysis:\n"
+    
+    # Formatting issues
+    if quality_issues['formatting']:
+        report += "\n**Formatting Issues:**\n"
+        seen = set()
+        for issue in quality_issues['formatting']:
+            key = (issue['type'], issue['line'][:40])
+            if key not in seen:
+                seen.add(key)
+                if issue['type'] == 'trailing_whitespace':
+                    report += f"- ⚠️ **Trailing whitespace** detected\n"
+                elif issue['type'] == 'mixed_indentation':
+                    report += f"- ❌ **Mixed indentation** (tabs and spaces): `{issue['line']}`\n"
+                elif issue['type'] == 'line_too_long':
+                    report += f"- ⚠️ **Line too long** ({issue['length']} chars > 120): `{issue['line']}`\n"
+    
+    # Spelling issues
+    if quality_issues['spelling']:
+        report += "\n**Spelling/Grammar Issues:**\n"
+        seen = set()
+        for issue in quality_issues['spelling']:
+            if issue['word'] not in seen:
+                seen.add(issue['word'])
+                report += f"- 📝 **{issue['word']}** → {issue['suggestion']}\n"
+    
+    # Bad practices
+    if quality_issues['bad_practices']:
+        report += "\n**Code Practice Issues:**\n"
+        seen = set()
+        for issue in quality_issues['bad_practices']:
+            key = issue['type']
+            if key not in seen:
+                seen.add(key)
+                if issue['type'] == 'potential_unused_import':
+                    report += f"- ⚠️ **Unused import check**: {issue['suggestion']}\n"
+                elif issue['type'] == 'deprecated_method':
+                    report += f"- ❌ **Deprecated API**: `{issue['method']}` - {issue['suggestion']}\n"
+                elif issue['type'] == 'unsafe_cast':
+                    report += f"- ❌ **Unsafe casting**: {issue['suggestion']}\n"
+                elif issue['type'] == 'potential_null_pointer':
+                    report += f"- ❌ **Potential NPE**: {issue['suggestion']}\n"
+                elif issue['type'] == 'empty_catch_block':
+                    report += f"- ❌ **Empty catch block**: {issue['suggestion']}\n"
+    
+    return report
+
+
 def call_azure_openai_for_review(diff_content: str, review_type: str = "code_review", pr_info: dict = None) -> str:
     """Call Azure OpenAI for code review or merge conflict analysis"""
     if not AZURE_OPENAI_API_KEY or not AZURE_OPENAI_ENDPOINT:
@@ -352,12 +531,21 @@ No code changes found between `{base_branch}` and `{head_branch}` branches.
     
     print(f"[pr-review] Found {len(diff_content.splitlines())} lines of changes")
     
+    # ===== NEW: Code Quality Analysis =====
+    print("[pr-review] Running code quality checks (spelling, formatting, bad practices)...")
+    quality_issues = check_code_quality(diff_content)
+    quality_report = format_quality_report(quality_issues)
+    
     # Generate review with PR context
     print(f"[pr-review] Generating {review_type} analysis with Azure OpenAI...")
     review_content = call_azure_openai_for_review(diff_content, review_type, pr_info)
     
+    # ===== COMBINE: Append quality report to review =====
+    review_content += quality_report
+    
     # Post comprehensive review comment
     success = post_github_comment(pr_number, review_content, pr_info)
+
     
     if success:
         print(f"[pr-review] ✅ {review_type.replace('_', ' ').title()} completed and posted to PR #{pr_number}")

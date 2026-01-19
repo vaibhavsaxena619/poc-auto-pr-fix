@@ -296,6 +296,58 @@ def get_current_branch() -> str:
     return 'Release'
 
 
+def extract_commit_message(error_msg: str, source_file: str) -> str:
+    """
+    Extract a meaningful commit message from error details.
+    
+    Examples:
+    - "cannot find symbol: class List" → "Fix: Add missing import for List"
+    - "cannot find symbol: class ArrayList" → "Fix: Add missing imports (List, ArrayList)"
+    """
+    # Look for common error patterns
+    if 'cannot find symbol' in error_msg.lower():
+        # Extract missing classes/symbols
+        symbols = []
+        for line in error_msg.split('\n'):
+            if 'cannot find symbol' in line.lower():
+                # Try to extract symbol from error message
+                if 'class' in line.lower():
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.lower() == 'class' and i + 1 < len(parts):
+                            symbols.append(parts[i + 1].strip('`'))
+        
+        if symbols:
+            unique_symbols = list(set(symbols))
+            if len(unique_symbols) == 1:
+                return f"Fix: Add missing import for {unique_symbols[0]}"
+            else:
+                return f"Fix: Add missing imports ({', '.join(unique_symbols[:3])})"
+        return "Fix: Add missing imports"
+    
+    elif 'incompatible types' in error_msg.lower():
+        return "Fix: Resolve type compatibility issue"
+    
+    elif 'abstract method not implemented' in error_msg.lower() or 'does not override abstract method' in error_msg.lower():
+        return "Fix: Implement required abstract methods"
+    
+    elif 'invalid method declaration' in error_msg.lower():
+        return "Fix: Correct method declaration"
+    
+    elif 'syntax error' in error_msg.lower() or 'unexpected token' in error_msg.lower():
+        return "Fix: Correct syntax error"
+    
+    elif 'unreachable statement' in error_msg.lower():
+        return "Fix: Remove unreachable code"
+    
+    else:
+        # Fallback: use first error line
+        first_error = error_msg.split('\n')[0].strip()
+        if len(first_error) > 60:
+            return f"Fix: {first_error[:60]}..."
+        return f"Fix: {first_error}" if first_error else "Fix: Compilation error"
+
+
 def commit_changes(source_file: str, error_msg: str) -> bool:
     """Commit and push fixed code to git with proper credential handling."""
     try:
@@ -309,8 +361,12 @@ def commit_changes(source_file: str, error_msg: str) -> bool:
                       check=False, capture_output=True, env=env)
         
         subprocess.run(['git', 'add', source_file], check=True, capture_output=True, env=env)
+        
+        # Generate meaningful commit message
+        commit_msg = extract_commit_message(error_msg, source_file)
+        
         result = subprocess.run(
-            ['git', 'commit', '-m', f'Build fix: {error_msg[:50]}...'],
+            ['git', 'commit', '-m', commit_msg],
             check=False,
             capture_output=True,
             text=True,
