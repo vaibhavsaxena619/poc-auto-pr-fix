@@ -388,3 +388,192 @@ A: Yes, set `ENABLE_AUTO_FIX=false` on the branch or use environment variable ov
 - [README.md](README.md) - Project overview
 - [LOCAL_SETUP.md](LOCAL_SETUP.md) - Environment setup
 - [JENKINS_CREDENTIALS.md](JENKINS_CREDENTIALS.md) - Credential configuration
+
+---
+
+## 🌐 **11. Multi-Language Support**
+
+The pipeline now supports automatic error fixing for **6 programming languages**:
+
+### Supported Languages
+
+| Language | File Extension | Checker | Safe Errors | Risky Errors |
+|----------|---|---|---|---|
+| **Java** | `.java` | `javac` | Missing imports, syntax, tests | Business logic, security, migrations |
+| **JavaScript** | `.js` | `eslint` | Syntax, imports, type errors, tests | Async logic, XSS, code execution |
+| **CSS** | `.css` | `stylelint` | Syntax, selectors, properties | Specificity conflicts, performance |
+| **Shell** | `.sh` | `bash -n` | Syntax, undefined vars, quotes | Injection, file ops, permissions |
+| **Smarty** | `.tpl`, `.smarty` | Framework | Syntax, undefined vars, tags | XSS injection, PHP execution |
+| **XSLT** | `.xsl`, `.xslt` | `xmllint` | Syntax, XPath, namespaces | XXE injection, recursion |
+
+### Language-Specific Security Concerns
+
+#### 🔴 **Java**
+```
+❌ Avoid auto-fixing:
+- SQL injection (use parameterized queries)
+- XXE vulnerabilities  
+- Weak cryptography (MD5, SHA1)
+- Deserialization attacks
+- Hardcoded credentials
+```
+
+#### 🟡 **JavaScript**
+```
+❌ Avoid auto-fixing:
+- Command injection (child_process.exec)
+- eval() and Function() constructor
+- innerHTML assignments (XSS)
+- Prototype pollution
+- Hardcoded secrets
+- Dependency vulnerabilities
+```
+
+#### 🔵 **CSS**
+```
+⚠️ Watch for:
+- expression() (IE vulnerability)
+- Behavior property (IE vulnerability)  
+- Data URLs with JavaScript
+- font-face with untrusted sources
+- Content property injection
+
+Note: CSS errors are mostly styling, low security risk
+```
+
+#### 🟢 **Shell**
+```
+🚨 HIGHEST RISK - Extra caution required:
+- Shell injection via unquoted variables
+- Command substitution injection ($(...), backticks)
+- Hardcoded credentials and API keys
+- Unsafe file operations (rm -rf, dd)
+- Running with elevated privileges
+- Unsafe curl/wget with passwords
+- eval() and exec() usage
+- Insecure /tmp handling
+```
+
+#### 🟠 **Smarty**
+```
+❌ Avoid auto-fixing:
+- XSS via unescaped variables (always use |escape)
+- {php} tags (full PHP execution risk)
+- {eval} tags (dynamic code execution)
+- Unsanitized includes
+- Template injection
+- Hardcoded database credentials
+```
+
+#### 🔴 **XSLT**
+```
+❌ Avoid auto-fixing:
+- XXE injection (XML External Entity)
+- Billion laughs DoS (quadratic blowup)
+- disable-output-escaping="yes" enabling injection
+- Recursive templates (infinite loops)
+- Unvalidated entity references
+- Sensitive data in output
+```
+
+### Language Auto-Fix Confidence Levels
+
+**HIGH CONFIDENCE (≥80%) - Auto-fix enabled:**
+- **Java:** Missing imports, formatting, test failures
+- **JavaScript:** Syntax errors, undefined variables, type errors
+- **CSS:** Property syntax, selector format
+- **Shell:** Variable expansion, quote balancing
+- **Smarty:** Tag syntax, variable definition
+- **XSLT:** XPath expressions, namespace issues
+
+**LOW CONFIDENCE (<80%) - Manual review required:**
+- **Java:** Logic errors, security issues, migrations
+- **JavaScript:** Async/await, injection attacks, prototype pollution
+- **CSS:** Specificity conflicts, complex selectors
+- **Shell:** Command injection, privilege escalation, file operations
+- **Smarty:** XSS, template injection, code execution
+- **XSLT:** XXE, recursion, output escaping
+
+### Example: Language Detection & Auto-Fix
+
+```bash
+# Java file - auto-fix missing import
+$ python3 build_fix.py src/App.java
+[...] Build fix initiated for src/App.java (java)
+✗ Error detected
+  Category: safe:missing_import (confidence: 90%)
+✓ HIGH CONFIDENCE: Safe to auto-fix
+  Sending error to Azure OpenAI for analysis...
+  ✓ SUCCESS: Fix verified!
+
+# Shell script - reject risky command injection error
+$ python3 build_fix.py deploy.sh
+[...] Build fix initiated for deploy.sh (shell)
+✗ Error detected
+  Category: risky:injection (confidence: 10%)
+⚠ LOW CONFIDENCE: Manual review required
+  Aborting auto-fix (requires confidence >= 80%)
+
+# CSS file - auto-fix property syntax
+$ python3 build_fix.py styles.css
+[...] Build fix initiated for styles.css (css)
+✗ Error detected
+  Category: safe:property_error (confidence: 90%)
+✓ HIGH CONFIDENCE: Safe to auto-fix
+```
+
+### Feature Flag Control by Language
+
+```groovy
+environment {
+    // Global control
+    ENABLE_AUTO_FIX = "true"
+    
+    // Language-specific overrides (future enhancement)
+    ENABLE_JAVA_FIX = "true"
+    ENABLE_SHELL_FIX = "false"  // Disable for shell (high risk)
+    ENABLE_JAVASCRIPT_FIX = "true"
+}
+```
+
+### Security Best Practices by Language
+
+**For Shell Scripts (⚠️ Highest Risk):**
+```bash
+# DO: Quote all variables
+"${variable}" ✓
+rm -rf "${directory}"
+
+# DON'T: Unquoted expansion
+$variable ✗
+rm -rf $directory
+```
+
+**For JavaScript:**
+```javascript
+// DO: Use parameterized queries
+db.query('SELECT * FROM users WHERE id = ?', [userId])
+
+// DON'T: String concatenation
+db.query('SELECT * FROM users WHERE id = ' + userId)
+```
+
+**For Smarty Templates:**
+```smarty
+<!-- DO: Always escape user output -->
+{$user_input|escape:'html'}
+
+<!-- DON'T: Unescaped output -->
+{$user_input}
+```
+
+**For XSLT:**
+```xml
+<!-- DO: Disable external entities -->
+<!DOCTYPE stylesheet [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+
+<!-- Use disable-output-escaping carefully -->
+<xsl:value-of select="..." disable-output-escaping="no"/>
+```
