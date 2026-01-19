@@ -271,31 +271,50 @@ def verify_fix(source_file: str) -> bool:
 
 
 def commit_changes(source_file: str, error_msg: str) -> bool:
-    """Commit and push fixed code to git."""
+    """Commit and push fixed code to git with proper credential handling."""
     try:
+        # Preserve environment for subprocess (needed for Git credentials in Jenkins)
+        env = os.environ.copy()
+        
         # Configure git user if not already configured (for Jenkins environments)
         subprocess.run(['git', 'config', 'user.email', 'build-automation@jenkins.local'], 
-                      check=False, capture_output=True)
+                      check=False, capture_output=True, env=env)
         subprocess.run(['git', 'config', 'user.name', 'Build Automation (GPT-5)'], 
-                      check=False, capture_output=True)
+                      check=False, capture_output=True, env=env)
         
-        subprocess.run(['git', 'add', source_file], check=True, capture_output=True)
+        subprocess.run(['git', 'add', source_file], check=True, capture_output=True, env=env)
         result = subprocess.run(
             ['git', 'commit', '-m', f'Build fix: {error_msg[:50]}...'],
             check=False,
             capture_output=True,
-            text=True
+            text=True,
+            env=env
         )
         if result.returncode == 0:
             print("✓ Changes committed to git")
             
             # === PUSH TO REMOTE ===
-            push_result = subprocess.run(
-                ['git', 'push', 'origin', 'HEAD'],
-                check=False,
-                capture_output=True,
-                text=True
-            )
+            # Use HTTPS with token authentication if PAT is available
+            github_pat = os.getenv('GITHUB_PAT', '')
+            if github_pat:
+                # Construct authenticated URL with token
+                push_url = f"https://x-access-token:{github_pat}@github.com/vaibhavsaxena619/poc-auto-pr-fix.git"
+                push_result = subprocess.run(
+                    ['git', 'push', push_url, 'HEAD'],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=env
+                )
+            else:
+                # Fallback: use origin remote (relies on credentials already configured)
+                push_result = subprocess.run(
+                    ['git', 'push', 'origin', 'HEAD'],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=env
+                )
             
             if push_result.returncode == 0:
                 print("✓ Changes pushed to remote repository")
