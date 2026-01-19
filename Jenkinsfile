@@ -9,6 +9,11 @@ pipeline {
         BRANCH_NAME = "${env.GIT_BRANCH?.replace('origin/', '') ?: 'unknown'}"
         AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
         AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-5"
+        
+        // === SECURITY & SAFETY FEATURE FLAGS ===
+        ENABLE_AUTO_FIX = "${env.ENABLE_AUTO_FIX ?: 'true'}"
+        ENABLE_OPENAI_CALLS = "${env.ENABLE_OPENAI_CALLS ?: 'true'}"
+        READ_ONLY_MODE = "${env.READ_ONLY_MODE ?: 'false'}"
     }
 
     stages {
@@ -55,11 +60,14 @@ pipeline {
                                                    usernameVariable: 'GITHUB_USERNAME',
                                                    passwordVariable: 'GITHUB_PAT')
                                 ]) {
-                                    sh '''
-                                        echo "Sending compilation error to GPT-5 for analysis..."
-                                        pip3 install openai requests --quiet --break-system-packages
-                                        python3 build_fix.py src/App.java
-                                    '''
+                                sh '''
+                                    echo "Sending compilation error to GPT-5 for analysis..."
+                                    pip3 install openai requests --quiet --break-system-packages
+                                    export ENABLE_AUTO_FIX="${ENABLE_AUTO_FIX}"
+                                    export ENABLE_OPENAI_CALLS="${ENABLE_OPENAI_CALLS}"
+                                    export READ_ONLY_MODE="${READ_ONLY_MODE}"
+                                    python3 build_fix.py src/App.java
+                                '''
                                 }
                                 
                                 // Retry compilation after fix
@@ -91,6 +99,8 @@ pipeline {
                                 sh '''
                                     pip3 install openai requests --quiet --break-system-packages
                                     git fetch origin --prune --quiet
+                                    export ENABLE_OPENAI_CALLS="${ENABLE_OPENAI_CALLS}"
+                                    export READ_ONLY_MODE="${READ_ONLY_MODE}"
                                     python3 pr_review.py ${CHANGE_ID} master ${CHANGE_BRANCH}
                                 '''
                             }
@@ -140,6 +150,9 @@ pipeline {
                                         sh '''
                                             echo "Sending error to Azure OpenAI for analysis..."
                                             pip3 install openai --quiet --break-system-packages
+                                            export ENABLE_AUTO_FIX="${ENABLE_AUTO_FIX}"
+                                            export ENABLE_OPENAI_CALLS="${ENABLE_OPENAI_CALLS}"
+                                            export READ_ONLY_MODE="${READ_ONLY_MODE}"
                                             python3 build_fix.py src/App.java
                                         '''
                                     }
