@@ -5,6 +5,10 @@ pipeline {
         git 'Default'
     }
     
+    parameters {
+        booleanParam(name: 'TRIGGER_RELEASE_BUILD', defaultValue: false, description: 'Set to true to trigger Release branch build')
+    }
+    
     environment {
         BRANCH_NAME = "${env.GIT_BRANCH?.replace('origin/', '') ?: 'unknown'}"
         AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
@@ -97,6 +101,7 @@ pipeline {
                 allOf {
                     branch 'Release'
                     expression { return env.CHANGE_ID == null }
+                    expression { return params.TRIGGER_RELEASE_BUILD == true }
                 }
             }
             stages {
@@ -295,6 +300,30 @@ EOF
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // ==========================================
+        // RELEASE BRANCH: Manual Trigger Required
+        // ==========================================
+        stage('Release - Manual Trigger Required') {
+            when {
+                allOf {
+                    branch 'Release'
+                    expression { return env.CHANGE_ID == null }
+                    expression { return params.TRIGGER_RELEASE_BUILD != true }
+                }
+            }
+            steps {
+                script {
+                    echo "ℹ Release branch detected"
+                    echo "⊘ Automatic builds are disabled for Release branch"
+                    echo "ℹ To trigger a production build:"
+                    echo "   1. Go to Jenkins job: poc-java-pr-workflow"
+                    echo "   2. Click 'Build with Parameters'"
+                    echo "   3. Set TRIGGER_RELEASE_BUILD to TRUE"
+                    echo "   4. Click 'Build'"
                 }
             }
         }
