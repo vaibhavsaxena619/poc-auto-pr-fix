@@ -270,6 +270,32 @@ def verify_fix(source_file: str) -> bool:
         return False
 
 
+def get_current_branch() -> str:
+    """Get the current branch name, handling detached HEAD state."""
+    try:
+        # Try to get the branch name from environment (Jenkins sets this)
+        branch = os.getenv('GIT_BRANCH', '').replace('origin/', '')
+        if branch:
+            return branch
+        
+        # Fallback: try to get from git
+        result = subprocess.run(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+            if branch and branch != 'HEAD':
+                return branch
+    except Exception:
+        pass
+    
+    # Final fallback: default to 'Release' for Release builds
+    return 'Release'
+
+
 def commit_changes(source_file: str, error_msg: str) -> bool:
     """Commit and push fixed code to git with proper credential handling."""
     try:
@@ -294,22 +320,26 @@ def commit_changes(source_file: str, error_msg: str) -> bool:
             print("✓ Changes committed to git")
             
             # === PUSH TO REMOTE ===
+            # Get the current branch name
+            branch_name = get_current_branch()
+            print(f"  Pushing to branch: {branch_name}")
+            
             # Use HTTPS with token authentication if PAT is available
             github_pat = os.getenv('GITHUB_PAT', '')
             if github_pat:
                 # Construct authenticated URL with token
                 push_url = f"https://x-access-token:{github_pat}@github.com/vaibhavsaxena619/poc-auto-pr-fix.git"
                 push_result = subprocess.run(
-                    ['git', 'push', push_url, 'HEAD'],
+                    ['git', 'push', push_url, f'HEAD:refs/heads/{branch_name}'],
                     check=False,
                     capture_output=True,
                     text=True,
                     env=env
                 )
             else:
-                # Fallback: use origin remote (relies on credentials already configured)
+                # Fallback: use origin remote with explicit refspec
                 push_result = subprocess.run(
-                    ['git', 'push', 'origin', 'HEAD'],
+                    ['git', 'push', 'origin', f'HEAD:refs/heads/{branch_name}'],
                     check=False,
                     capture_output=True,
                     text=True,
