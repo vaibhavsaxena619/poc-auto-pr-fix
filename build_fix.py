@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
-Build failure recovery script - Analyzes compilation errors and applies fixes via Azure OpenAI.
-Production-ready error handling with comprehensive logging.
+Multi-language build failure recovery script.
+Analyzes compilation/syntax errors in any supported language and applies fixes via Azure OpenAI.
+
+Supported Languages:
+- Java, JavaScript, CSS, Shell (Bash), Smarty, XSLT
 
 Security & Safety Features:
+- Language-specific error patterns and confidence scoring
 - Retry caps (max 2 attempts) to prevent infinite loops
 - Error deduplication via SHA256 hashing
 - Confidence classifier for safe vs risky fixes
 - Prompt optimization: log chunking and pattern extraction
-- Feature flags: ENABLE_AUTO_FIX, ENABLE_OPENAI_CALLS
+- Feature flags: ENABLE_AUTO_FIX, ENABLE_OPENAI_CALLS, READ_ONLY_MODE
 """
 
 import os
@@ -26,6 +30,18 @@ except ImportError:
     print("ERROR: openai not installed. Run: pip install openai")
     sys.exit(1)
 
+try:
+    from language_config import (
+        detect_language,
+        get_language_config_by_file,
+        classify_error_by_language,
+        Language,
+        get_all_supported_languages
+    )
+except ImportError:
+    print("ERROR: language_config module not found")
+    sys.exit(1)
+
 
 # === CONFIGURATION & FEATURE FLAGS ===
 MAX_FIX_ATTEMPTS = 2  # Prevent infinite loops
@@ -33,59 +49,53 @@ ENABLE_AUTO_FIX = os.getenv('ENABLE_AUTO_FIX', 'true').lower() == 'true'
 ENABLE_OPENAI_CALLS = os.getenv('ENABLE_OPENAI_CALLS', 'true').lower() == 'true'
 READ_ONLY_MODE = os.getenv('READ_ONLY_MODE', 'false').lower() == 'true'
 
-# Safe error categories (high confidence for auto-fix)
+# Legacy Java-specific patterns (for backward compatibility)
 SAFE_ERROR_PATTERNS = {
     'missing_import': r'cannot find symbol|import not found|unresolved import',
     'formatting': r'unexpected token|invalid syntax|malformed',
     'test_failure': r'AssertionError|Test.*failed|FAILED',
-    'lint_issue': r'warning|unused variable|dead code'
-}
-
-# Risky error categories (manual review only)
-RISKY_ERROR_PATTERNS = {
-    'business_logic': r'NullPointerException|IndexOutOfBoundsException|logic error',
-    'security': r'SQL injection|XSS|vulnerability|deprecated|insecure',
-    'migration': r'database|schema|ALTER TABLE|migration'
-}
 
 
 def get_compilation_error(source_file: str) -> str:
-    """Capture compilation error from source file."""
+    """
+    Check source file for syntax/compilation errors.
+    Language-agnostic: detects language and uses appropriate checker.
+    """
+    language = detect_language(source_file)
+    config = get_language_config_by_file(source_file)
+    
+    if not config or not config.compiler:
+        print(f"WARNING: No compiler configured for {language}")
+        return ""
+    
     try:
+        # Build language-specific command
+        cmd = [config.compiler, source_file]
+        cmd.extend(config.compiler_args)
+        
         result = subprocess.run(
-            ['javac', source_file],
+            cmd,
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=15
         )
         return result.stderr if result.returncode != 0 else ""
     except Exception as e:
-        print(f"ERROR: Failed to compile {source_file}: {e}")
+        print(f"ERROR: Failed to check {source_file}: {e}")
         return ""
 
 
-def classify_error_confidence(error_message: str) -> tuple[str, float]:
+def classify_error_confidence(error_message: str, source_file: str) -> tuple[str, float]:
     """
     Classify error as safe (high confidence) or risky (low confidence).
+    Uses language-specific patterns.
     
     Returns: (category, confidence_score: 0.0-1.0)
     - High confidence (0.8+): Safe to auto-fix
     - Low confidence (<0.8): Requires manual review
     """
-    error_lower = error_message.lower()
-    
-    # Check risky patterns first (return immediately if found)
-    for risk_category, pattern in RISKY_ERROR_PATTERNS.items():
-        if re.search(pattern, error_lower):
-            return (f"risky:{risk_category}", 0.1)  # Low confidence
-    
-    # Check safe patterns
-    for safe_category, pattern in SAFE_ERROR_PATTERNS.items():
-        if re.search(pattern, error_lower):
-            return (f"safe:{safe_category}", 0.9)  # High confidence
-    
-    # Unknown error: default to low confidence
-    return ("unknown", 0.5)
+    language = detect_language(source_file)
+    return classify_error_by_language(error_message, language)
 
 
 def extract_error_essence(error_message: str, source_code: str, max_tokens: int = 500) -> str:
@@ -183,8 +193,11 @@ def read_source_file(source_file: str) -> str:
         sys.exit(1)
 
 
-def send_to_azure_openai(error_message: str, source_code: str, api_key: str, endpoint: str, api_version: str, deployment_name: str) -> str:
-    """Send compilation error to Azure OpenAI for analysis and fix."""
+def send_to_azure_openai(error_message: str, source_code: str, source_file: str, api_key: str, endpoint: str, api_version: str, deployment_name: str) -> str:
+    """
+    Send error to Azure OpenAI for analysis and fix.
+    Uses language-specific prompts and system messages.
+    """
     try:
         client = AzureOpenAI(
             api_key=api_key,
@@ -192,21 +205,27 @@ def send_to_azure_openai(error_message: str, source_code: str, api_key: str, end
             azure_endpoint=endpoint
         )
         
-        prompt = f"""You are a Java code expert. A compilation error occurred. 
-Analyze and provide ONLY the corrected code without explanations.
-
-ERROR:
-{error_message}
-
-CURRENT CODE:
-{source_code}
-
-RESPONSE: Provide only the corrected Java code that fixes this error. No explanations."""
+        # Get language-specific config
+        config = get_language_config_by_file(source_file)
+        language = detect_language(source_file)
+        
+        if not config:
+            print(f"ERROR: Unsupported language: {language}")
+            return ""
+        
+        # Use language-specific prompt template
+        prompt = config.fix_prompt_template.format(
+            error=error_message,
+            source=source_code
+        )
+        
+        # Language-specific system message
+        system_msg = f"You are a {language.value} code expert that fixes errors and errors without refactoring."
         
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[
-                {"role": "system", "content": "You are a Java code expert that fixes compilation errors."},
+                {"role": "system", "content": system_msg},
                 {"role": "user", "content": prompt}
             ],
             max_completion_tokens=2000
@@ -271,9 +290,10 @@ def commit_changes(source_file: str, error_msg: str) -> bool:
 
 
 def main():
-    """Main build fix workflow with safety guardrails."""
+    """Main build fix workflow with safety guardrails - Multi-language support."""
     if len(sys.argv) < 2:
-        print("Usage: python build_fix.py <source_file>")
+        print(f"Usage: python build_fix.py <source_file>")
+        print(f"Supported: {', '.join(get_all_supported_languages())}")
         sys.exit(1)
     
     # === FEATURE FLAG CHECKS ===
@@ -285,6 +305,16 @@ def main():
         print("INFO: Read-only mode enabled - will analyze but not apply fixes")
     
     source_file = sys.argv[1]
+    
+    # === STEP 0: DETECT LANGUAGE ===
+    language = detect_language(source_file)
+    if language.value == "unknown":
+        print(f"ERROR: Unsupported language")
+        print(f"Supported languages: {', '.join(get_all_supported_languages())}")
+        sys.exit(1)
+    
+    print(f"[{datetime.now().isoformat()}] Build fix initiated for {source_file} ({language.value})")
+    
     api_key = os.getenv('AZURE_OPENAI_API_KEY')
     endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
     api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2024-12-01-preview')
@@ -298,18 +328,16 @@ def main():
         print(f"ERROR: Source file not found: {source_file}")
         sys.exit(1)
     
-    print(f"[{datetime.now().isoformat()}] Build fix initiated for {source_file}")
-    
     # === STEP 1: GET COMPILATION ERROR ===
     error_msg = get_compilation_error(source_file)
     if not error_msg:
-        print("✓ No compilation errors detected")
+        print("✓ No errors detected")
         return
     
-    print(f"✗ Compilation error detected")
+    print(f"✗ Error detected")
     
-    # === STEP 2: CLASSIFY ERROR CONFIDENCE ===
-    error_category, confidence = classify_error_confidence(error_msg)
+    # === STEP 2: CLASSIFY ERROR CONFIDENCE (LANGUAGE-SPECIFIC) ===
+    error_category, confidence = classify_error_confidence(error_msg, source_file)
     print(f"  Category: {error_category} (confidence: {confidence:.0%})")
     
     # === STEP 3: CHECK ERROR DEDUPLICATION ===
@@ -339,7 +367,7 @@ def main():
         sys.exit(1)
     
     print("  Sending error to Azure OpenAI for analysis...")
-    fixed_code = send_to_azure_openai(optimized_error, source_code, api_key, endpoint, api_version, deployment_name)
+    fixed_code = send_to_azure_openai(optimized_error, source_code, source_file, api_key, endpoint, api_version, deployment_name)
     
     if not fixed_code:
         print("  ✗ Azure OpenAI failed to generate fix")
@@ -351,7 +379,7 @@ def main():
         print("  [READ-ONLY] Would apply fix (mode disabled)")
         return
     
-    print("  Applying Azure OpenAI GPT-5 fix...")
+    print("  Applying fix...")
     if not apply_fix(source_file, fixed_code):
         record_error_attempt(source_file, error_hash, False)
         sys.exit(1)
@@ -359,11 +387,11 @@ def main():
     # === STEP 8: VERIFY FIX ===
     print("  Verifying fix...")
     if verify_fix(source_file):
-        print("  ✓ SUCCESS: Fix verified - code compiles!")
+        print("  ✓ SUCCESS: Fix verified!")
         commit_changes(source_file, error_msg[:50])
         record_error_attempt(source_file, error_hash, True)
     else:
-        print("  ✗ Fix did not resolve compilation errors")
+        print("  ✗ Fix did not resolve errors")
         record_error_attempt(source_file, error_hash, False)
         sys.exit(1)
 
