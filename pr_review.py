@@ -33,7 +33,22 @@ def run_git_command(cmd: list) -> str:
 
 def get_pr_diff(base_branch: str, head_branch: str) -> str:
     """Get the diff between two branches"""
+    # First, ensure we have the latest refs from remote
+    run_git_command(["git", "fetch", "origin", f"{base_branch}:{base_branch}", f"{head_branch}:{head_branch}"])
+    
+    # Try with remote branches first
     diff = run_git_command(["git", "diff", f"origin/{base_branch}...origin/{head_branch}"])
+    
+    # If that fails, try with local branches
+    if not diff.strip():
+        diff = run_git_command(["git", "diff", f"{base_branch}...{head_branch}"])
+    
+    # If still no diff, try a simpler approach using merge-base
+    if not diff.strip():
+        merge_base = run_git_command(["git", "merge-base", "HEAD", f"origin/{base_branch}"])
+        if merge_base:
+            diff = run_git_command(["git", "diff", merge_base, "HEAD"])
+    
     return diff
 
 def call_azure_openai_for_review(diff_content: str, review_type: str = "code_review", pr_info: dict = None) -> str:
@@ -62,7 +77,7 @@ REVIEW REQUIREMENTS:
 
 RESPONSE FORMAT:
 ## 🔍 Code Review Summary
-**Overall Rating:** [Rating] | **Reviewer:** Gemini AI
+**Overall Rating:** [Rating] | **Reviewer:** Azure OpenAI GPT-5
 
 ## ✅ Positive Points:
 - [List good practices and well-written code sections]
@@ -150,7 +165,7 @@ The automated code review system experienced technical difficulties while analyz
 3. **Verify Compilation** - Make sure code compiles without errors
 
 **What was attempted:**
-- Gemini AI code analysis
+- Azure OpenAI GPT-5 code analysis
 - Automated security scanning
 - Best practice validation
 
@@ -228,7 +243,7 @@ def post_github_comment(pr_number: int, comment: str, pr_info: dict = None):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
     enhanced_comment += f"""
 ---
-*🤖 Automated review by Jenkins PR Review Bot using Gemini AI*  
+*🤖 Automated review by Jenkins PR Review Bot using Azure OpenAI GPT-5*  
 *Generated on: {timestamp}*
 *Job: Jenkins Multibranch Pipeline*"""
     

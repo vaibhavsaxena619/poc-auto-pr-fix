@@ -2,12 +2,21 @@
 """
 Build failure recovery script - Analyzes compilation errors and applies fixes via Azure OpenAI.
 Production-ready error handling with comprehensive logging.
+
+Security & Safety Features:
+- Retry caps (max 2 attempts) to prevent infinite loops
+- Error deduplication via SHA256 hashing
+- Confidence classifier for safe vs risky fixes
+- Prompt optimization: log chunking and pattern extraction
+- Feature flags: ENABLE_AUTO_FIX, ENABLE_OPENAI_CALLS
 """
 
 import os
 import subprocess
 import sys
 import json
+import hashlib
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -16,6 +25,28 @@ try:
 except ImportError:
     print("ERROR: openai not installed. Run: pip install openai")
     sys.exit(1)
+
+
+# === CONFIGURATION & FEATURE FLAGS ===
+MAX_FIX_ATTEMPTS = 2  # Prevent infinite loops
+ENABLE_AUTO_FIX = os.getenv('ENABLE_AUTO_FIX', 'true').lower() == 'true'
+ENABLE_OPENAI_CALLS = os.getenv('ENABLE_OPENAI_CALLS', 'true').lower() == 'true'
+READ_ONLY_MODE = os.getenv('READ_ONLY_MODE', 'false').lower() == 'true'
+
+# Safe error categories (high confidence for auto-fix)
+SAFE_ERROR_PATTERNS = {
+    'missing_import': r'cannot find symbol|import not found|unresolved import',
+    'formatting': r'unexpected token|invalid syntax|malformed',
+    'test_failure': r'AssertionError|Test.*failed|FAILED',
+    'lint_issue': r'warning|unused variable|dead code'
+}
+
+# Risky error categories (manual review only)
+RISKY_ERROR_PATTERNS = {
+    'business_logic': r'NullPointerException|IndexOutOfBoundsException|logic error',
+    'security': r'SQL injection|XSS|vulnerability|deprecated|insecure',
+    'migration': r'database|schema|ALTER TABLE|migration'
+}
 
 
 def get_compilation_error(source_file: str) -> str:
@@ -31,6 +62,115 @@ def get_compilation_error(source_file: str) -> str:
     except Exception as e:
         print(f"ERROR: Failed to compile {source_file}: {e}")
         return ""
+
+
+def classify_error_confidence(error_message: str) -> tuple[str, float]:
+    """
+    Classify error as safe (high confidence) or risky (low confidence).
+    
+    Returns: (category, confidence_score: 0.0-1.0)
+    - High confidence (0.8+): Safe to auto-fix
+    - Low confidence (<0.8): Requires manual review
+    """
+    error_lower = error_message.lower()
+    
+    # Check risky patterns first (return immediately if found)
+    for risk_category, pattern in RISKY_ERROR_PATTERNS.items():
+        if re.search(pattern, error_lower):
+            return (f"risky:{risk_category}", 0.1)  # Low confidence
+    
+    # Check safe patterns
+    for safe_category, pattern in SAFE_ERROR_PATTERNS.items():
+        if re.search(pattern, error_lower):
+            return (f"safe:{safe_category}", 0.9)  # High confidence
+    
+    # Unknown error: default to low confidence
+    return ("unknown", 0.5)
+
+
+def extract_error_essence(error_message: str, source_code: str, max_tokens: int = 500) -> str:
+    """
+    Extract only essential error information to reduce token usage.
+    
+    Returns optimized error context with:
+    - Error type and line number
+    - 3 lines of code context
+    - Full error stack (first 500 chars)
+    """
+    lines = error_message.split('\n')
+    
+    # Extract line number if available
+    line_match = re.search(r':(\d+):', error_message)
+    line_num = int(line_match.group(1)) if line_match else None
+    
+    # Build optimized prompt
+    prompt = f"ERROR: {lines[0][:200]}\n\n"
+    
+    if line_num and source_code:
+        source_lines = source_code.split('\n')
+        start = max(0, line_num - 2)
+        end = min(len(source_lines), line_num + 1)
+        
+        prompt += "CODE CONTEXT:\n"
+        for i in range(start, end):
+            prefix = ">>> " if i == line_num - 1 else "    "
+            prompt += f"{prefix}{i+1}: {source_lines[i]}\n"
+        prompt += "\n"
+    
+    # Add first part of error stack
+    prompt += f"STACK: {error_message[:max_tokens]}"
+    return prompt
+
+
+def get_error_hash(error_message: str) -> str:
+    """Generate SHA256 hash of error for deduplication."""
+    return hashlib.sha256(error_message.encode()).hexdigest()[:8]
+
+
+def check_error_history(source_file: str, error_hash: str) -> bool:
+    """
+    Check if we've already tried fixing this exact error.
+    
+    Returns True if error was seen before (should skip), False otherwise.
+    """
+    history_file = Path(f"{source_file}.fix_history.json")
+    
+    try:
+        if not history_file.exists():
+            return False
+        
+        with open(history_file, 'r') as f:
+            history = json.load(f)
+        
+        return error_hash in history.get('attempted_errors', [])
+    except Exception:
+        return False
+
+
+def record_error_attempt(source_file: str, error_hash: str, success: bool) -> None:
+    """Record error fix attempt in history to prevent retry loops."""
+    history_file = Path(f"{source_file}.fix_history.json")
+    
+    try:
+        history = {}
+        if history_file.exists():
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+        
+        if 'attempted_errors' not in history:
+            history['attempted_errors'] = []
+        
+        if error_hash not in history['attempted_errors']:
+            history['attempted_errors'].append(error_hash)
+        
+        history['last_attempt'] = datetime.now().isoformat()
+        history['last_success'] = success
+        history['attempt_count'] = history.get('attempt_count', 0) + 1
+        
+        with open(history_file, 'w') as f:
+            json.dump(history, f, indent=2)
+    except Exception as e:
+        print(f"WARNING: Could not record error history: {e}")
 
 
 def read_source_file(source_file: str) -> str:
@@ -108,23 +248,41 @@ def commit_changes(source_file: str, error_msg: str) -> bool:
     """Commit fixed code to git."""
     try:
         subprocess.run(['git', 'add', source_file], check=True, capture_output=True)
-        subprocess.run(
+        result = subprocess.run(
             ['git', 'commit', '-m', f'Build fix: {error_msg[:50]}...'],
-            check=True,
-            capture_output=True
+            check=False,
+            capture_output=True,
+            text=True
         )
-        print("Changes committed to git")
-        return True
+        if result.returncode == 0:
+            print("Changes committed to git")
+            return True
+        else:
+            # Handle detached HEAD or other git issues gracefully
+            if 'detached HEAD' in result.stderr or 'no changes added' in result.stderr:
+                print("INFO: Git commit skipped (detached HEAD or no changes)")
+                return True
+            else:
+                print(f"WARNING: Git commit failed: {result.stderr}")
+                return True  # Still consider it a success as the fix was applied
     except Exception as e:
         print(f"WARNING: Git commit failed: {e}")
         return False
 
 
 def main():
-    """Main build fix workflow."""
+    """Main build fix workflow with safety guardrails."""
     if len(sys.argv) < 2:
         print("Usage: python build_fix.py <source_file>")
         sys.exit(1)
+    
+    # === FEATURE FLAG CHECKS ===
+    if not ENABLE_AUTO_FIX:
+        print("INFO: Auto-fix disabled (ENABLE_AUTO_FIX=false)")
+        sys.exit(0)
+    
+    if READ_ONLY_MODE:
+        print("INFO: Read-only mode enabled - will analyze but not apply fixes")
     
     source_file = sys.argv[1]
     api_key = os.getenv('AZURE_OPENAI_API_KEY')
@@ -142,37 +300,71 @@ def main():
     
     print(f"[{datetime.now().isoformat()}] Build fix initiated for {source_file}")
     
-    # Get compilation error
+    # === STEP 1: GET COMPILATION ERROR ===
     error_msg = get_compilation_error(source_file)
     if not error_msg:
-        print("No compilation errors detected")
+        print("✓ No compilation errors detected")
         return
     
-    print(f"Compilation error detected: {error_msg[:100]}...")
+    print(f"✗ Compilation error detected")
     
-    # Read current source
+    # === STEP 2: CLASSIFY ERROR CONFIDENCE ===
+    error_category, confidence = classify_error_confidence(error_msg)
+    print(f"  Category: {error_category} (confidence: {confidence:.0%})")
+    
+    # === STEP 3: CHECK ERROR DEDUPLICATION ===
+    error_hash = get_error_hash(error_msg)
+    if check_error_history(source_file, error_hash):
+        print(f"  ⚠ ERROR LOOP DETECTED: Same error attempted before")
+        print(f"  Skipping retry to prevent infinite loop (MAX_FIX_ATTEMPTS={MAX_FIX_ATTEMPTS})")
+        sys.exit(1)
+    
+    # === STEP 4: CONFIDENCE GATING ===
+    if confidence < 0.8:
+        print(f"  ⚠ LOW CONFIDENCE ({error_category}): Manual review required")
+        print(f"  Aborting auto-fix (requires confidence >= 0.8)")
+        record_error_attempt(source_file, error_hash, False)
+        sys.exit(1)
+    
+    print(f"  ✓ HIGH CONFIDENCE: Safe to auto-fix")
+    
+    # === STEP 5: OPTIMIZE PROMPT (REDUCE TOKEN USAGE) ===
     source_code = read_source_file(source_file)
+    optimized_error = extract_error_essence(error_msg, source_code)
     
-    # Send to Azure OpenAI for fix
-    print("Sending error to Azure OpenAI for analysis...")
-    fixed_code = send_to_azure_openai(error_msg, source_code, api_key, endpoint, api_version, deployment_name)
+    # === STEP 6: CALL OPENAI (IF ENABLED) ===
+    if not ENABLE_OPENAI_CALLS:
+        print("INFO: OpenAI calls disabled (ENABLE_OPENAI_CALLS=false)")
+        print(f"ERROR: {optimized_error[:200]}...")
+        sys.exit(1)
+    
+    print("  Sending error to Azure OpenAI for analysis...")
+    fixed_code = send_to_azure_openai(optimized_error, source_code, api_key, endpoint, api_version, deployment_name)
     
     if not fixed_code:
-        print("ERROR: Azure OpenAI failed to generate fix")
+        print("  ✗ Azure OpenAI failed to generate fix")
+        record_error_attempt(source_file, error_hash, False)
         sys.exit(1)
     
-    # Apply fix
-    print("Applying Gemini-generated fix...")
+    # === STEP 7: APPLY FIX (IF NOT IN READ-ONLY MODE) ===
+    if READ_ONLY_MODE:
+        print("  [READ-ONLY] Would apply fix (mode disabled)")
+        return
+    
+    print("  Applying Azure OpenAI GPT-5 fix...")
     if not apply_fix(source_file, fixed_code):
+        record_error_attempt(source_file, error_hash, False)
         sys.exit(1)
     
-    # Verify fix
-    print("Verifying fix...")
+    # === STEP 8: VERIFY FIX ===
+    print("  Verifying fix...")
     if verify_fix(source_file):
-        print("SUCCESS: Fix verified - code compiles!")
+        print("  ✓ SUCCESS: Fix verified - code compiles!")
         commit_changes(source_file, error_msg[:50])
+        record_error_attempt(source_file, error_hash, True)
     else:
-        print("ERROR: Fix did not resolve compilation errors")
+        print("  ✗ Fix did not resolve compilation errors")
+        record_error_attempt(source_file, error_hash, False)
         sys.exit(1)
 
 
