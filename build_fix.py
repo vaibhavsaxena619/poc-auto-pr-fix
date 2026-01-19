@@ -127,12 +127,26 @@ def get_error_hash(error_message: str) -> str:
     return hashlib.sha256(error_message.encode()).hexdigest()[:8]
 
 
-def check_error_history(source_file: str, error_hash: str) -> bool:
+def check_error_history(source_file: str, error_hash: str, session_id: str = None) -> bool:
     """
-    Check if we've already tried fixing this exact error.
+    Check if we've already tried fixing this exact error IN THIS SESSION ONLY.
     
-    Returns True if error was seen before (should skip), False otherwise.
+    For CI/CD environments: Each build is a new session, so we don't block fixes
+    based on history from previous builds. This prevents "ERROR LOOP DETECTED" 
+    errors when the same compilation error appears in different builds.
+    
+    Returns True if error was seen before IN THIS SESSION (should skip), False otherwise.
     """
+    # Use session_id (environment variable) to track current build/session
+    # If not provided, we're in a new session - don't block based on history
+    if not session_id:
+        session_id = os.getenv('BUILD_ID', os.getenv('RUN_ID', None))
+    
+    if not session_id:
+        # No session ID available - we're likely in a fresh Jenkins build
+        # Don't block based on previous history
+        return False
+    
     history_file = Path(f"{source_file}.fix_history.json")
     
     try:
@@ -142,13 +156,22 @@ def check_error_history(source_file: str, error_hash: str) -> bool:
         with open(history_file, 'r') as f:
             history = json.load(f)
         
-        return error_hash in history.get('attempted_errors', [])
+        # Only check if error was attempted in SAME session
+        current_session = history.get('current_session', '')
+        if current_session == session_id:
+            return error_hash in history.get('attempted_errors', [])
+        else:
+            # Different session - don't block
+            return False
     except Exception:
         return False
 
 
-def record_error_attempt(source_file: str, error_hash: str, success: bool) -> None:
-    """Record error fix attempt in history to prevent retry loops."""
+def record_error_attempt(source_file: str, error_hash: str, success: bool, session_id: str = None) -> None:
+    """Record error fix attempt in history to prevent retry loops within same session."""
+    if not session_id:
+        session_id = os.getenv('BUILD_ID', os.getenv('RUN_ID', 'unknown'))
+    
     history_file = Path(f"{source_file}.fix_history.json")
     
     try:
@@ -156,6 +179,9 @@ def record_error_attempt(source_file: str, error_hash: str, success: bool) -> No
         if history_file.exists():
             with open(history_file, 'r') as f:
                 history = json.load(f)
+        
+        # Track current session
+        history['current_session'] = session_id
         
         if 'attempted_errors' not in history:
             history['attempted_errors'] = []
@@ -306,6 +332,11 @@ def main():
     
     print(f"[{datetime.now().isoformat()}] Build fix initiated for {source_file}")
     
+    # Get session ID for this build (Jenkins BUILD_ID or RUN_ID)
+    session_id = os.getenv('BUILD_ID', os.getenv('RUN_ID', None))
+    if session_id:
+        print(f"  Session: {session_id}")
+    
     # === STEP 1: GET COMPILATION ERROR ===
     error_msg = get_compilation_error(source_file)
     if not error_msg:
@@ -318,18 +349,19 @@ def main():
     error_category, confidence = classify_error_confidence(error_msg)
     print(f"  Category: {error_category} (confidence: {confidence:.0%})")
     
-    # === STEP 3: CHECK ERROR DEDUPLICATION ===
+    # === STEP 3: CHECK ERROR DEDUPLICATION (Session-specific) ===
     error_hash = get_error_hash(error_msg)
-    if check_error_history(source_file, error_hash):
-        print(f"  ⚠ ERROR LOOP DETECTED: Same error attempted before")
+    if check_error_history(source_file, error_hash, session_id):
+        print(f"  ⚠ ERROR LOOP DETECTED: Same error attempted before in this session")
         print(f"  Skipping retry to prevent infinite loop (MAX_FIX_ATTEMPTS={MAX_FIX_ATTEMPTS})")
+        record_error_attempt(source_file, error_hash, False, session_id)
         sys.exit(1)
     
     # === STEP 4: CONFIDENCE GATING ===
     if confidence < 0.8:
         print(f"  ⚠ LOW CONFIDENCE ({error_category}): Manual review required")
         print(f"  Aborting auto-fix (requires confidence >= 0.8)")
-        record_error_attempt(source_file, error_hash, False)
+        record_error_attempt(source_file, error_hash, False, session_id)
         sys.exit(1)
     
     print(f"  ✓ HIGH CONFIDENCE: Safe to auto-fix")
@@ -349,7 +381,7 @@ def main():
     
     if not fixed_code:
         print("  ✗ Azure OpenAI failed to generate fix")
-        record_error_attempt(source_file, error_hash, False)
+        record_error_attempt(source_file, error_hash, False, session_id)
         sys.exit(1)
     
     # === STEP 7: APPLY FIX (IF NOT IN READ-ONLY MODE) ===
@@ -359,7 +391,7 @@ def main():
     
     print("  Applying Azure OpenAI GPT-5 fix...")
     if not apply_fix(source_file, fixed_code):
-        record_error_attempt(source_file, error_hash, False)
+        record_error_attempt(source_file, error_hash, False, session_id)
         sys.exit(1)
     
     # === STEP 8: VERIFY FIX ===
@@ -367,10 +399,10 @@ def main():
     if verify_fix(source_file):
         print("  ✓ SUCCESS: Fix verified - code compiles!")
         commit_changes(source_file, error_msg[:50])
-        record_error_attempt(source_file, error_hash, True)
+        record_error_attempt(source_file, error_hash, True, session_id)
     else:
         print("  ✗ Fix did not resolve compilation errors")
-        record_error_attempt(source_file, error_hash, False)
+        record_error_attempt(source_file, error_hash, False, session_id)
         sys.exit(1)
 
 
