@@ -1,3 +1,6 @@
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 public class App {
     // TEST CASE: Intentionally missing method for unfixable business logic test
