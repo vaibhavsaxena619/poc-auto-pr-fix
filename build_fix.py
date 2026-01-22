@@ -313,18 +313,25 @@ def send_to_azure_openai(error_message: str, source_code: str, api_key: str, end
         prompt = f"""You are a Java code expert. A compilation error occurred. 
 Analyze and provide ONLY the corrected code without explanations.
 
+CRITICAL INSTRUCTIONS:
+1. Fix ONLY the specific error mentioned
+2. PRESERVE all other code - do NOT delete any code sections
+3. If you cannot fix an error due to missing domain knowledge, LEAVE IT AS IS
+4. Return the COMPLETE source file with minimal changes
+5. Never simplify or remove code that doesn't directly cause the error
+
 ERROR:
 {error_message}
 
 CURRENT CODE:
 {source_code}
 
-RESPONSE: Provide only the corrected Java code that fixes this error. No explanations."""
+RESPONSE: Provide only the COMPLETE corrected Java code. Preserve all code sections. Make minimal changes only to fix the specific error."""
         
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[
-                {"role": "system", "content": "You are a Java code expert that fixes compilation errors."},
+                {"role": "system", "content": "You are a Java code expert that fixes compilation errors. Always preserve existing code and make minimal changes."},
                 {"role": "user", "content": prompt}
             ],
             max_completion_tokens=2000
