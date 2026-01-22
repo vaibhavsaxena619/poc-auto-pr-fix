@@ -1,3 +1,4 @@
+
 public class App {
     // TEST CASE: Intentionally missing method for unfixable business logic test
     // This method is NOT implemented to verify that GPT creates a review PR
@@ -6,7 +7,11 @@ public class App {
     public static void main(String[] args) throws Exception {
         System.out.println("Hello, World!");
         System.out.println("Testing Jenkins PR automation!");
-        List<String> sampleList = new ArrayList<>()
+        
+        x = 5; // This line will cause a compilation error due to missing declaration
+        System.out.println(x);
+        }
+
     }
     
 }
