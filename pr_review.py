@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import re
 import subprocess
 import requests
 from pathlib import Path
@@ -52,6 +53,16 @@ def get_pr_diff(base_branch: str, head_branch: str) -> str:
     return diff
 
 
+def extract_file_info_from_diff(diff_content: str) -> str:
+    """Extract current file name from diff content."""
+    for line in diff_content.split('\n'):
+        if line.startswith('+++'):
+            filename = line.replace('+++', '').replace('a/', '').replace('b/', '').split('\t')[0].strip()
+            if filename:
+                return filename
+    return 'unknown'
+
+
 def check_code_quality(diff_content: str) -> dict:
     """Analyze code quality issues in the diff"""
     issues = {
@@ -61,35 +72,46 @@ def check_code_quality(diff_content: str) -> dict:
     }
     
     lines = diff_content.split('\n')
+    current_file = extract_file_info_from_diff(diff_content)
+    actual_line_num = 0
     
-    for line_num, line in enumerate(lines):
+    for line_idx, line in enumerate(lines):
+        # Track line numbers from @@ markers
+        if line.startswith('@@'):
+            match = re.search(r'\+(\d+)', line)
+            if match:
+                actual_line_num = int(match.group(1))
+            continue
+        
         # Only check added/modified lines (start with +, not +++)
         if not line.startswith('+') or line.startswith('+++'):
+            if line.startswith(' ') or line.startswith('-'):
+                actual_line_num += 1
             continue
         
         content = line[1:]  # Remove the + prefix
         
         # ===== CHECK 1: Formatting Issues =====
-        # Check for trailing whitespace
-        if content.rstrip() != content:
-            issues['formatting'].append({
-                'type': 'trailing_whitespace',
-                'line': content[:80],
-                'severity': 'minor'
-            })
+        # NOTE: Trailing whitespace check is IGNORED per requirements
         
         # Check for inconsistent indentation (tabs vs spaces)
         if '\t' in content and '    ' in content:
             issues['formatting'].append({
                 'type': 'mixed_indentation',
+                'file': current_file,
+                'line_num': actual_line_num,
                 'line': content[:80],
                 'severity': 'major'
             })
+            actual_line_num += 1
+            continue
         
         # Check for lines that are too long (>120 chars)
         if len(content.rstrip()) > 120:
             issues['formatting'].append({
                 'type': 'line_too_long',
+                'file': current_file,
+                'line_num': actual_line_num,
                 'line': content[:80],
                 'length': len(content.rstrip()),
                 'severity': 'minor'
@@ -103,6 +125,8 @@ def check_code_quality(diff_content: str) -> dict:
         if 'import ' in content and ';' in content:
             issues['bad_practices'].append({
                 'type': 'potential_unused_import',
+                'file': current_file,
+                'line_num': actual_line_num,
                 'line': content.strip()[:80],
                 'suggestion': 'Verify this import is actually used in the code',
                 'severity': 'minor'
@@ -115,6 +139,8 @@ def check_code_quality(diff_content: str) -> dict:
                 issues['bad_practices'].append({
                     'type': 'deprecated_method',
                     'method': method,
+                    'file': current_file,
+                    'line_num': actual_line_num,
                     'line': content.strip()[:80],
                     'suggestion': f'Consider using Calendar or LocalDate instead of {method}',
                     'severity': 'major'
@@ -124,6 +150,8 @@ def check_code_quality(diff_content: str) -> dict:
         if '(Object)' in content or '((Object)' in content:
             issues['bad_practices'].append({
                 'type': 'unsafe_cast',
+                'file': current_file,
+                'line_num': actual_line_num,
                 'line': content.strip()[:80],
                 'suggestion': 'Consider using instanceof checks before casting',
                 'severity': 'major'
@@ -134,6 +162,8 @@ def check_code_quality(diff_content: str) -> dict:
             if any(word in content for word in ['HashMap', '.get(', '.getOrDefault', '.getValue']):
                 issues['bad_practices'].append({
                     'type': 'potential_null_pointer',
+                    'file': current_file,
+                    'line_num': actual_line_num,
                     'line': content.strip()[:80],
                     'suggestion': 'Consider null-checking or using Optional',
                     'severity': 'major'
@@ -143,6 +173,8 @@ def check_code_quality(diff_content: str) -> dict:
         if 'catch' in content and 'catch(Exception e)' in content:
             issues['bad_practices'].append({
                 'type': 'empty_catch_block',
+                'file': current_file,
+                'line_num': actual_line_num,
                 'line': content.strip()[:80],
                 'suggestion': 'Avoid empty catch blocks - log or handle the exception',
                 'severity': 'major'
@@ -169,10 +201,14 @@ def check_code_quality(diff_content: str) -> dict:
                     issues['spelling'].append({
                         'type': 'spelling_error',
                         'word': typo,
+                        'file': current_file,
+                        'line_num': actual_line_num,
                         'suggestion': f'Did you mean "{correct}"?',
                         'line': comment_part.strip()[:80],
                         'severity': 'minor'
                     })
+        
+        actual_line_num += 1
     
     return issues
 
@@ -180,52 +216,43 @@ def check_code_quality(diff_content: str) -> dict:
 def format_quality_report(quality_issues: dict) -> str:
     """Format code quality issues into a readable report"""
     if not any(quality_issues.values()):
-        return "\n### ✅ Code Quality Check: PASSED\nNo formatting, spelling, or practice issues detected."
+        return "\n### ✅ Code Quality Check: PASSED\nNo formatting or practice issues detected."
     
     report = "\n### 🔧 Code Quality Analysis:\n"
     
     # Formatting issues
     if quality_issues['formatting']:
         report += "\n**Formatting Issues:**\n"
-        seen = set()
         for issue in quality_issues['formatting']:
-            key = (issue['type'], issue['line'][:40])
-            if key not in seen:
-                seen.add(key)
-                if issue['type'] == 'trailing_whitespace':
-                    report += f"- ⚠️ **Trailing whitespace** detected\n"
-                elif issue['type'] == 'mixed_indentation':
-                    report += f"- ❌ **Mixed indentation** (tabs and spaces): `{issue['line']}`\n"
-                elif issue['type'] == 'line_too_long':
-                    report += f"- ⚠️ **Line too long** ({issue['length']} chars > 120): `{issue['line']}`\n"
+            if issue['type'] == 'mixed_indentation':
+                report += f"- ❌ **Mixed indentation** ({issue['file']}:{issue.get('line_num', '?')}): `{issue['line']}`\n"
+            elif issue['type'] == 'line_too_long':
+                report += f"- ⚠️ **Line too long** ({issue['length']} chars > 120) at {issue['file']}:{issue.get('line_num', '?')}\n"
     
     # Spelling issues
     if quality_issues['spelling']:
         report += "\n**Spelling/Grammar Issues:**\n"
         seen = set()
         for issue in quality_issues['spelling']:
-            if issue['word'] not in seen:
-                seen.add(issue['word'])
-                report += f"- 📝 **{issue['word']}** → {issue['suggestion']}\n"
+            key = (issue['word'], issue['file'], issue.get('line_num'))
+            if key not in seen:
+                seen.add(key)
+                report += f"- 📝 **{issue['word']}** → {issue['suggestion']} ({issue['file']}:{issue.get('line_num', '?')})\n"
     
     # Bad practices
     if quality_issues['bad_practices']:
         report += "\n**Code Practice Issues:**\n"
-        seen = set()
         for issue in quality_issues['bad_practices']:
-            key = issue['type']
-            if key not in seen:
-                seen.add(key)
-                if issue['type'] == 'potential_unused_import':
-                    report += f"- ⚠️ **Unused import check**: {issue['suggestion']}\n"
-                elif issue['type'] == 'deprecated_method':
-                    report += f"- ❌ **Deprecated API**: `{issue['method']}` - {issue['suggestion']}\n"
-                elif issue['type'] == 'unsafe_cast':
-                    report += f"- ❌ **Unsafe casting**: {issue['suggestion']}\n"
-                elif issue['type'] == 'potential_null_pointer':
-                    report += f"- ❌ **Potential NPE**: {issue['suggestion']}\n"
-                elif issue['type'] == 'empty_catch_block':
-                    report += f"- ❌ **Empty catch block**: {issue['suggestion']}\n"
+            if issue['type'] == 'potential_unused_import':
+                report += f"- ⚠️ **Unused import** ({issue['file']}:{issue.get('line_num', '?')}): {issue['suggestion']}\n"
+            elif issue['type'] == 'deprecated_method':
+                report += f"- ❌ **Deprecated API** ({issue['file']}:{issue.get('line_num', '?')}): `{issue['method']}` - {issue['suggestion']}\n"
+            elif issue['type'] == 'unsafe_cast':
+                report += f"- ❌ **Unsafe casting** ({issue['file']}:{issue.get('line_num', '?')}): {issue['suggestion']}\n"
+            elif issue['type'] == 'potential_null_pointer':
+                report += f"- ❌ **Potential NPE** ({issue['file']}:{issue.get('line_num', '?')}): {issue['suggestion']}\n"
+            elif issue['type'] == 'empty_catch_block':
+                report += f"- ❌ **Empty catch block** ({issue['file']}:{issue.get('line_num', '?')}): {issue['suggestion']}\n"
     
     return report
 
