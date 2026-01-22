@@ -146,7 +146,7 @@ pipeline {
                                         export ENABLE_AUTO_FIX="${ENABLE_AUTO_FIX}"
                                         export ENABLE_OPENAI_CALLS="${ENABLE_OPENAI_CALLS}"
                                         export READ_ONLY_MODE="${READ_ONLY_MODE}"
-                                        python3 build_fix.py src/App.java
+                                        python3 build_fix_v2.py src/App.java
                                     '''
                                 }
                                 env.AUTO_FIX_SUCCESS = 'true'
