@@ -1,17 +1,17 @@
+import java.util.Arrays;
 import java.util.List;
-import java.util.ArrayList;
 
 public class App {
     public static void main(String[] args) throws Exception {
         System.out.println("Hello, World!");
         System.out.println("Testing Jenkins PR automation!");
-        List<String> sampleList = List.of("one", "two", "three");
+        List<String> sampleList = Arrays.asList("one", "two", "three");
         for (String item : sampleList) {
             System.out.println(item);
         }
         
         // Low confidence test: Undefined variable (risky pattern)
-        undefinedVariable = "This variable was never declared";
+        String undefinedVariable = "This variable was never declared";
         System.out.println(undefinedVariable);
         
         // Unfixable logic test: Missing business logic implementation
