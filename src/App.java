@@ -1,4 +1,3 @@
-
 public class App {
     // TEST CASE: Intentionally missing method for unfixable business logic test
     // This method is NOT implemented to verify that GPT creates a review PR
@@ -7,10 +6,7 @@ public class App {
     public static void main(String[] args) throws Exception {
         System.out.println("Hello, World!");
         System.out.println("Testing Jenkins PR automation!");
-        List<String> sampleList = Arrays.asList("one", "two", "three");
-        for (String item : sampleList) {
-            System.out.println(item);
-        }
+        List<String> sampleList = new ArrayList<>()
     }
     
 }
