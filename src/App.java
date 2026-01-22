@@ -11,20 +11,6 @@ public class App {
         for (String item : sampleList) {
             System.out.println(item);
         }
-        
-        String undefinedVariable = "This variable was never declared";
-        System.out.println(undefinedVariable);
-        
-        List<Double> prices = new ArrayList<>();
-        prices.add(100.0);
-        prices.add(250.0);
-        prices.add(50.0);
-        
-        double total = 0;
-        for (Double price : prices) {
-            total += applyDiscount(price);
-        }
-        System.out.println("Total with discount: " + total);
     }
     
 }
