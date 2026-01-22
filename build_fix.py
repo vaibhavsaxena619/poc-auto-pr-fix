@@ -180,7 +180,7 @@ def try_previous_commits(source_file: str, max_attempts: int = 3) -> bool:
         return False
 
 
-
+def extract_error_essence(error_message: str, source_code: str, max_tokens: int = 500) -> str:
     """
     Extract only essential error information to reduce token usage.
     
