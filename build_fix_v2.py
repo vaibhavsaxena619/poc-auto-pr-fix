@@ -48,7 +48,7 @@ READ_ONLY_MODE = os.getenv('READ_ONLY_MODE', 'false').lower() == 'true'
 SAFE_ERROR_PATTERNS = {
     'missing_import': r'cannot find symbol|import not found|unresolved import',
     'formatting': r'unexpected token|invalid syntax|malformed',
-    'syntax_error': r'class.*interface.*enum.*record expected|unexpected.*token|mismatched|unclosed',
+    'syntax_error': r'(class|interface|enum|record)\s+expected|unexpected.*token|mismatched|unclosed|expected.*token',
     'test_failure': r'AssertionError|Test.*failed|FAILED',
     'lint_issue': r'warning|unused variable|dead code'
 }
