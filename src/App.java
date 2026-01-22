@@ -9,5 +9,9 @@ public class App {
         for (String item : sampleList) {
             System.out.println(item);
         }
+        
+        // Low confidence test: Undefined variable (risky pattern)
+        undefinedVariable = "This variable was never declared";
+        System.out.println(undefinedVariable);
     }
 }
