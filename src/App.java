@@ -11,7 +11,7 @@ public class App {
         }
         
         // Low confidence test: Undefined variable (risky pattern)
-        undefinedVariable = "This variable was never declared";
+        String undefinedVariable = "This variable was never declared";
         System.out.println(undefinedVariable);
     }
 }
