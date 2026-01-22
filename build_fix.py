@@ -88,7 +88,99 @@ def classify_error_confidence(error_message: str) -> tuple[str, float]:
     return ("unknown", 0.5)
 
 
-def extract_error_essence(error_message: str, source_code: str, max_tokens: int = 500) -> str:
+def try_previous_commits(source_file: str, max_attempts: int = 3) -> bool:
+    """
+    Try to build previous commits to verify the error is not pre-existing.
+    
+    Returns True if a previous commit builds successfully (error is recent),
+    Returns False if all recent commits have the same error (error is old).
+    """
+    print(f"  🔍 Checking previous commits to isolate the issue...")
+    
+    try:
+        # Get the last N commits
+        result = subprocess.run(
+            ['git', 'log', '--oneline', f'-{max_attempts}'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0 or not result.stdout.strip():
+            print(f"    ⚠️ Could not retrieve commit history")
+            return False
+        
+        commits = result.stdout.strip().split('\n')[1:]  # Skip current commit
+        
+        if not commits:
+            print(f"    ℹ️ No previous commits to test")
+            return False
+        
+        current_sha = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True,
+            text=True
+        ).stdout.strip()
+        
+        for idx, commit_line in enumerate(commits):
+            try:
+                commit_sha = commit_line.split()[0]
+                commit_msg = ' '.join(commit_line.split()[1:])
+                
+                print(f"    Testing commit {idx + 1}/{len(commits)}: {commit_sha[:7]} ({commit_msg[:40]}...)")
+                
+                # Stash current changes
+                subprocess.run(['git', 'stash'], capture_output=True, check=False)
+                
+                # Checkout previous commit
+                checkout = subprocess.run(
+                    ['git', 'checkout', commit_sha],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if checkout.returncode != 0:
+                    print(f"      Could not checkout {commit_sha[:7]}")
+                    continue
+                
+                # Try to compile previous version
+                compile_result = subprocess.run(
+                    ['javac', source_file],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if compile_result.returncode == 0:
+                    # Previous commit compiles! Error is recent
+                    print(f"    ✅ Previous commit {commit_sha[:7]} compiles successfully")
+                    print(f"       Error introduced in current version - fix is needed")
+                    
+                    # Restore current state
+                    subprocess.run(['git', 'checkout', current_sha], capture_output=True, check=False)
+                    subprocess.run(['git', 'stash', 'pop'], capture_output=True, check=False)
+                    return True
+                else:
+                    print(f"      {commit_sha[:7]} also has compilation errors (error is older)")
+                    
+            except Exception as e:
+                print(f"      Error testing {commit_sha[:7]}: {str(e)}")
+                continue
+        
+        # Restore current state
+        subprocess.run(['git', 'checkout', current_sha], capture_output=True, check=False)
+        subprocess.run(['git', 'stash', 'pop'], capture_output=True, check=False)
+        
+        print(f"    ℹ️ All recent commits have similar errors (issue may be pre-existing)")
+        return False
+        
+    except Exception as e:
+        print(f"  ⚠️ Could not check previous commits: {str(e)}")
+        return False
+
+
+
     """
     Extract only essential error information to reduce token usage.
     
@@ -709,27 +801,35 @@ def main():
     
     # === STEP 4: CONFIDENCE GATING ===
     if confidence < 0.8:
-        print(f"  ⚠ LOW CONFIDENCE ({error_category}): Manual review required")
-        print(f"  Creating review PR instead of auto-fixing...")
+        print(f"  ⚠ LOW CONFIDENCE ({error_category}): Manual review may be required")
         
-        # Create PR for manual review instead of auto-fixing
-        source_code = read_source_file(source_file)
-        fixed_code = send_to_azure_openai(error_msg, source_code, api_key, endpoint, api_version, deployment_name)
+        # Try to determine if error is recent by checking previous commits
+        error_is_recent = try_previous_commits(source_file, max_attempts=3)
         
-        if fixed_code:
-            create_review_pr_for_low_confidence(
-                source_file=source_file,
-                original_code=source_code,
-                fixed_code=fixed_code,
-                error_msg=error_msg,
-                error_category=error_category,
-                confidence=confidence
-            )
-        
-        record_error_attempt(source_file, error_hash, False, session_id)
-        sys.exit(0)  # Exit gracefully - PR created for review
+        if error_is_recent:
+            print(f"  ✓ Error is recent (introduced in current version)")
+            print(f"  Attempting auto-fix despite low confidence...")
+            # Continue with auto-fix attempt
+        else:
+            print(f"  Creating review PR for manual review instead of auto-fixing...")
+            # Create PR for manual review instead of auto-fixing
+            source_code = read_source_file(source_file)
+            fixed_code = send_to_azure_openai(error_msg, source_code, api_key, endpoint, api_version, deployment_name)
+            
+            if fixed_code:
+                create_review_pr_for_low_confidence(
+                    source_file=source_file,
+                    original_code=source_code,
+                    fixed_code=fixed_code,
+                    error_msg=error_msg,
+                    error_category=error_category,
+                    confidence=confidence
+                )
+            
+            record_error_attempt(source_file, error_hash, False, session_id)
+            sys.exit(0)  # Exit gracefully - PR created for review
     
-    print(f"  ✓ HIGH CONFIDENCE: Safe to auto-fix")
+    print(f"  ✓ Proceeding with fix (high confidence or recent error)")
     
     # === STEP 5: OPTIMIZE PROMPT (REDUCE TOKEN USAGE) ===
     source_code = read_source_file(source_file)
