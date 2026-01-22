@@ -54,7 +54,7 @@ SAFE_ERROR_PATTERNS = {
 
 # Risky error categories (manual review only)
 RISKY_ERROR_PATTERNS = {
-    'business_logic': r'NullPointerException|IndexOutOfBoundsException|logic error|method.*not found',
+    'business_logic': r'NullPointerException|IndexOutOfBoundsException|logic error|method.*not found|RuntimeException',
     'security': r'SQL injection|XSS|vulnerability|deprecated|insecure',
     'migration': r'database|schema|ALTER TABLE|migration'
 }
@@ -121,7 +121,12 @@ def classify_error_confidence(error_message: str) -> Tuple[str, float]:
     """
     error_lower = error_message.lower()
     
-    # Check risky patterns first (return immediately if found)
+    # SPECIAL CASE: Check for method/variable symbol errors first
+    # These are risky even if they match "cannot find symbol"
+    if re.search(r'symbol:\s*(method|variable)', error_lower):
+        return ("risky:business_logic", 0.1)  # Low confidence
+    
+    # Check risky patterns (that aren't method/variable symbols)
     for risk_category, pattern in RISKY_ERROR_PATTERNS.items():
         if re.search(pattern, error_lower):
             return (f"risky:{risk_category}", 0.1)  # Low confidence
