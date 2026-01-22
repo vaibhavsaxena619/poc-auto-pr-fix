@@ -563,13 +563,35 @@ def main():
             if fixed_code:
                 apply_fix(source_file, fixed_code)
                 
-                # Create branch with low-confidence issues tagged
-                original_author = os.getenv('PR_AUTHOR', None)
-                create_fix_branch_for_mixed_errors(source_file, fixed_code, low_conf_errors, original_author)
-                
-                print("✓ Created fix branch with high-confidence fixes")
-                print(f"  Low-confidence issues left for manual review: {len(low_conf_errors)}")
-            sys.exit(0)
+                print("  Verifying high-confidence fixes...")
+                if verify_fix(source_file):
+                    # Code compiles! Create branch with remaining low-confidence issues
+                    original_author = os.getenv('PR_AUTHOR', None)
+                    create_fix_branch_for_mixed_errors(source_file, fixed_code, low_conf_errors, original_author)
+                    
+                    print("✓ Created fix branch with high-confidence fixes")
+                    print(f"  Low-confidence issues left for manual review: {len(low_conf_errors)}")
+                    sys.exit(0)
+                else:
+                    # Fix didn't fully resolve - search commit history
+                    print("  ⚠️ High-confidence fix didn't resolve all issues - searching commit history...")
+                    good_commit, found = find_last_good_commit(source_file, MAX_COMMIT_HISTORY_SEARCH)
+                    
+                    if found:
+                        print(f"  ✅ Found good commit: {good_commit}")
+                        print(f"  Checking out stable commit...")
+                        
+                        subprocess.run(['git', 'checkout', good_commit], capture_output=True, check=False)
+                        
+                        if verify_fix(source_file):
+                            print("✓ Verified: Good commit builds successfully")
+                            sys.exit(0)
+                    
+                    print("  ⚠️ Could not find a compilable commit")
+                    print("  Creating review branch with attempted fixes...")
+                    original_author = os.getenv('PR_AUTHOR', None)
+                    create_fix_branch_for_mixed_errors(source_file, fixed_code, low_conf_errors, original_author)
+                    sys.exit(0)
         else:
             print(f"  ℹ️ Only low-confidence errors found - searching commit history...")
             
