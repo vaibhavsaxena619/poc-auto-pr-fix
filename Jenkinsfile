@@ -34,19 +34,23 @@ pipeline {
         }
 
         // ==========================================
-        // DEV_POC_V1 WORKFLOW: No automatic builds
+        // DEV BRANCHES WORKFLOW: No automatic builds
         // ==========================================
-        stage('Dev_Poc_V1 - No Build') {
+        stage('Dev Branches - No Build') {
             when {
                 allOf {
-                    branch 'Dev_Poc_V1'
+                    anyOf {
+                        branch 'Dev_Low'
+                        branch 'Dev_High'
+                        branch 'Dev_Poc_V1'
+                    }
                     expression { return env.CHANGE_ID == null }
                 }
             }
             steps {
                 script {
-                    echo "✓ Dev_Poc_V1 branch detected"
-                    echo "⊘ No automatic builds on Dev_Poc_V1 - Push changes without compilation"
+                    echo "✓ Development branch detected: ${BRANCH_NAME}"
+                    echo "⊘ No automatic builds on development branches"
                     echo "ℹ To trigger builds, create a PR to Release or manually trigger Release branch build"
                 }
             }
@@ -344,6 +348,8 @@ EOF
                 allOf {
                     not {
                         anyOf {
+                            branch 'Dev_Low'
+                            branch 'Dev_High'
                             branch 'Dev_Poc_V1'
                             branch 'Release'
                         }
@@ -353,7 +359,7 @@ EOF
             }
             steps {
                 script {
-                    echo "⊘ Branch '${BRANCH_NAME}': No action (only Dev_Poc_V1 and Release branches are processed)"
+                    echo "⊘ Branch '${BRANCH_NAME}': No action (only Dev_Low, Dev_High, Dev_Poc_V1, and Release branches are processed)"
                 }
             }
         }
@@ -373,8 +379,8 @@ EOF
                     echo "✓ SUCCESS: PR #${env.CHANGE_ID} - Code review posted"
                 } else if (env.BRANCH_NAME == 'Release') {
                     echo "✓ SUCCESS: Release build completed"
-                } else if (env.BRANCH_NAME == 'Dev_Poc_V1') {
-                    echo "ℹ Dev_Poc_V1: No build triggered (as expected)"
+                } else if (env.BRANCH_NAME in ['Dev_Low', 'Dev_High', 'Dev_Poc_V1']) {
+                    echo "ℹ ${env.BRANCH_NAME}: No build triggered (as expected)"
                 }
             }
         }
