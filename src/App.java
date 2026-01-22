@@ -1,3 +1,5 @@
+import java.util.List;
+import java.util.ArrayList;
 
 public class App {
     public static void main(String[] args) throws Exception {
@@ -11,5 +13,18 @@ public class App {
         // Low confidence test: Undefined variable (risky pattern)
         undefinedVariable = "This variable was never declared";
         System.out.println(undefinedVariable);
+        
+        // Unfixable logic test: Missing business logic implementation
+        // GPT won't know what calculateDiscount() should do without requirements
+        List<Double> prices = new ArrayList<>();
+        prices.add(100.0);
+        prices.add(250.0);
+        prices.add(50.0);
+        
+        double total = 0;
+        for (Double price : prices) {
+            total += applyDiscount(price);  // Method doesn't exist - needs business logic
+        }
+        System.out.println("Total with discount: " + total);
     }
 }
