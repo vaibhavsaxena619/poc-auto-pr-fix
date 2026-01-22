@@ -8,10 +8,7 @@ public class App {
         System.out.println("Hello, World!");
         System.out.println("Testing Jenkins PR automation!");
         
-        x = 5; // This line will cause a compilation error due to missing declaration
+        int x = 5; // Fixed: declared as int
         System.out.println(x);
-        }
-
     }
-    
 }
