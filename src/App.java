@@ -1,5 +1,3 @@
-import java.util.ArrayList;
-
 public class App {
     // TEST CASE: Intentionally missing method for unfixable business logic test
     // This method is NOT implemented to verify that GPT creates a review PR
