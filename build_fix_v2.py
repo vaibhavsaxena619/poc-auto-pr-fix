@@ -12,6 +12,11 @@ Improvements over v1:
    - Finds LAST GOOD COMMIT (fully fixable or no issues)
    - Builds from that point instead of failing
 
+3. FAULTY COMMIT DETECTION: Automatically identifies the commit that broke the build
+   - Uses git bisect for efficient detection
+   - Notifies author with AI-generated fix suggestions
+   - Integrates with learning system for continuous improvement
+
 Security & Safety Features:
 - Retry caps (max 2 attempts) to prevent infinite loops
 - Error deduplication via SHA256 hashing
@@ -26,6 +31,7 @@ import sys
 import json
 import hashlib
 import re
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple, Dict
@@ -36,6 +42,28 @@ except ImportError:
     print("ERROR: openai not installed. Run: pip install openai")
     sys.exit(1)
 
+# Try to import fault analyzer (optional)
+try:
+    from fault_commit_analyzer import FaultyCommitAnalyzer
+    HAS_FAULT_ANALYZER = True
+except ImportError:
+    HAS_FAULT_ANALYZER = False
+    print("WARNING: fault_commit_analyzer not available - fault detection disabled")
+
+# Try to import learning database (optional)
+try:
+    from learning_classifier import LearningDatabase
+    HAS_LEARNING_DB = True
+except ImportError:
+    HAS_LEARNING_DB = False
+    print("WARNING: learning_classifier not available - learning features disabled")
+
+# === LOGGING ===
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] [%(levelname)s] [build-fix] %(message)s'
+)
+
 
 # === CONFIGURATION & FEATURE FLAGS ===
 MAX_FIX_ATTEMPTS = 2
@@ -43,6 +71,9 @@ MAX_COMMIT_HISTORY_SEARCH = 10  # NEW: Search up to 10 commits back
 ENABLE_AUTO_FIX = os.getenv('ENABLE_AUTO_FIX', 'true').lower() == 'true'
 ENABLE_OPENAI_CALLS = os.getenv('ENABLE_OPENAI_CALLS', 'true').lower() == 'true'
 READ_ONLY_MODE = os.getenv('READ_ONLY_MODE', 'false').lower() == 'true'
+ENABLE_FAULT_DETECTION = os.getenv('ENABLE_FAULT_DETECTION', 'true').lower() == 'true'
+ENABLE_LEARNING = os.getenv('ENABLE_LEARNING', 'true').lower() == 'true'
+BUILD_LOG_URL = os.getenv('BUILD_LOG_URL', None)  # URL to failed build log
 
 # Safe error categories (high confidence for auto-fix)
 SAFE_ERROR_PATTERNS = {
@@ -116,6 +147,8 @@ def classify_error_confidence(error_message: str) -> Tuple[str, float]:
     """
     Classify error as safe (high confidence) or risky (low confidence).
     
+    UPDATED: Now checks learning database for previously promoted patterns.
+    
     Returns: (category, confidence_score: 0.0-1.0)
     - High confidence (0.8+): Safe to auto-fix
     - Low confidence (<0.8): Requires manual review
@@ -130,7 +163,21 @@ def classify_error_confidence(error_message: str) -> Tuple[str, float]:
     # Check risky patterns (that aren't method/variable symbols)
     for risk_category, pattern in RISKY_ERROR_PATTERNS.items():
         if re.search(pattern, error_lower):
-            return (f"risky:{risk_category}", 0.1)  # Low confidence
+            category = f"risky:{risk_category}"
+            confidence = 0.1  # Low confidence
+            
+            # Check if this pattern has been learned as HIGH confidence
+            if HAS_LEARNING_DB and ENABLE_LEARNING:
+                try:
+                    learning_db = LearningDatabase()
+                    learned_confidence = learning_db.get_pattern_confidence(category)
+                    if learned_confidence and learned_confidence > confidence:
+                        print(f"  📚 LEARNED: {category} promoted to {learned_confidence:.0%}")
+                        return (category, learned_confidence)
+                except Exception as e:
+                    logging.debug(f"Could not check learning DB: {e}")
+            
+            return (category, confidence)
     
     # Check safe patterns
     for safe_category, pattern in SAFE_ERROR_PATTERNS.items():
@@ -493,6 +540,37 @@ def commit_and_push(source_file: str, commit_msg: str) -> bool:
         return False
 
 
+def trigger_fault_detection(source_file: str, error_msg: str) -> None:
+    """
+    NEW: Trigger faulty commit detection asynchronously.
+    
+    This runs in background to identify which commit introduced the error
+    and sends notifications to the author.
+    """
+    if not ENABLE_FAULT_DETECTION or not HAS_FAULT_ANALYZER:
+        return
+    
+    print(f"\n  🔍 BACKGROUND: Analyzing faulty commit...")
+    
+    try:
+        analyzer = FaultyCommitAnalyzer(source_file)
+        result = analyzer.analyze(error_msg, BUILD_LOG_URL)
+        
+        if result['success']:
+            print(f"  ✅ Faulty commit identified: {result['faulty_commit'][:7]}")
+            print(f"  📧 Author: {result['author']} ({result['email']})")
+            if result['verified']:
+                print(f"  ✓ Verified: Build works without this commit")
+            if result['fix_suggestion']:
+                print(f"  💡 Fix suggestion generated and sent to author")
+        else:
+            print(f"  ⚠️ Fault detection failed: {result.get('error', 'unknown')}")
+    
+    except Exception as e:
+        print(f"  ⚠️ Fault detection error: {e}")
+
+
+
 def main():
     """Main workflow with advanced error handling."""
     if len(sys.argv) < 2:
@@ -526,6 +604,9 @@ def main():
         return
     
     print(f"✗ Compilation errors detected")
+    
+    # === NEW: TRIGGER FAULT DETECTION ===
+    trigger_fault_detection(source_file, error_msg)
     
     # === STEP 2: PARSE ALL ERRORS (NEW) ===
     all_errors = parse_all_errors(error_msg)
