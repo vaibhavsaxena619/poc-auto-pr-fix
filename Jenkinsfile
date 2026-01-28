@@ -39,11 +39,7 @@ pipeline {
         stage('Dev Branches - No Build') {
             when {
                 allOf {
-                    anyOf {
-                        branch 'Dev_Low'
-                        branch 'Dev_High'
-                        branch 'Dev_Poc_V1'
-                    }
+                    not { branch 'Release' }
                     expression { return env.CHANGE_ID == null }
                 }
             }
@@ -359,7 +355,7 @@ EOF
             }
             steps {
                 script {
-                    echo "⊘ Branch '${BRANCH_NAME}': No action (only Dev_Low, Dev_High, Dev_Poc_V1, and Release branches are processed)"
+                    echo "⊘ Branch '${BRANCH_NAME}': No action (only Dev and Release branches are processed)"
                 }
             }
         }
@@ -379,7 +375,7 @@ EOF
                     echo "✓ SUCCESS: PR #${env.CHANGE_ID} - Code review posted"
                 } else if (env.BRANCH_NAME == 'Release') {
                     echo "✓ SUCCESS: Release build completed"
-                } else if (env.BRANCH_NAME in ['Dev_Low', 'Dev_High', 'Dev_Poc_V1']) {
+                } else if (env.BRANCH_NAME != 'Release') {
                     echo "ℹ ${env.BRANCH_NAME}: No build triggered (as expected)"
                 }
             }
