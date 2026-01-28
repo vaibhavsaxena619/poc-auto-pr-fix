@@ -387,14 +387,35 @@ def create_pr_for_low_confidence_fix(source_file: str, fixed_code: str,
     The fix requires manual review before merging to Release.
     """
     try:
-        # Get current branch to use as base
-        current_branch_result = subprocess.run(
-            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        base_branch = current_branch_result.stdout.strip() if current_branch_result.returncode == 0 else 'Release'
+        # Get base branch - prioritize environment variable (from Jenkins)
+        base_branch = os.getenv('BRANCH_NAME', None)
+        
+        # If not in environment, try git
+        if not base_branch or base_branch == 'HEAD':
+            # Try to get branch from git config
+            branch_result = subprocess.run(
+                ['git', 'symbolic-ref', '--short', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if branch_result.returncode == 0 and branch_result.stdout.strip():
+                base_branch = branch_result.stdout.strip()
+            else:
+                # Detached HEAD - try to find the branch we came from
+                remote_result = subprocess.run(
+                    ['git', 'branch', '-r', '--contains', 'HEAD'],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                if remote_result.returncode == 0 and remote_result.stdout.strip():
+                    # Get first branch, remove origin/ prefix
+                    base_branch = remote_result.stdout.strip().split('\n')[0].replace('origin/', '').strip()
+                else:
+                    base_branch = 'Release'  # Default fallback
+        
+        print(f"  Target base branch: {base_branch}")
         
         env = os.environ.copy()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -459,6 +480,10 @@ This PR contains an LLM-generated fix for **{len(low_conf_errors)} low-confidenc
         for i, error in enumerate(low_conf_errors, 1):
             pr_body += f"\n**Issue {i}:** `{error.category}` (Confidence: {error.confidence:.0%})\n"
             pr_body += f"```\n{error.error_msg[:400]}\n```\n"
+        
+        # Add metadata for learning system (hidden HTML comment)
+        root_causes = list(set([e.category for e in low_conf_errors]))
+        pr_body += f"\n\n<!-- LEARNING_METADATA: {json.dumps({'root_causes': root_causes, 'error_count': len(low_conf_errors), 'source_file': source_file})} -->\n"
         
         pr_body += f"""\n### Review Checklist
 

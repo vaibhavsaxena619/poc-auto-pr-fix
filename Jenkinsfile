@@ -59,11 +59,23 @@ pipeline {
             when {
                 allOf {
                     changeRequest()
+                    expression { return env.CHANGE_TARGET != null }
                 }
             }
             steps {
                 script {
                     echo "PR #${env.CHANGE_ID} to ${env.CHANGE_TARGET} detected"
+                    
+                    // Check if PR was just merged and if it's a low-confidence fix
+                    def prTitle = sh(script: "git log -1 --pretty=%s", returnStdout: true).trim()
+                    
+                    if (prTitle.contains('REQUIRES REVIEW') || prTitle.contains('Low-Confidence')) {
+                        echo "📚 Low-confidence fix PR detected - will update learning system if merged"
+                        
+                        // This will be triggered by PR merge, not during review
+                        // The actual learning update happens in post-merge webhook
+                    }
+                    
                     echo "Analyzing code changes without compilation..."
                     
                     withCredentials([
@@ -88,6 +100,59 @@ pipeline {
                             echo "  - Best practices recommendations"
                             echo "=========================================="
                         '''
+                    }
+                }
+            }
+        }
+        
+        // ==========================================
+        // PR MERGE EVENT: Update Learning System
+        // ==========================================
+        stage('PR Merged - Update Learning') {
+            when {
+                allOf {
+                    branch 'Release'
+                    expression { return env.CHANGE_ID == null }
+                    expression { 
+                        // Check if recent commit is a merge commit for low-confidence fix
+                        def commitMsg = sh(script: "git log -1 --pretty=%s", returnStdout: true).trim()
+                        return commitMsg.contains('Merge pull request') && 
+                               (commitMsg.contains('low-confidence-fix') || 
+                                commitMsg.contains('REQUIRES REVIEW'))
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "🔀 Low-confidence fix PR merged - updating learning system..."
+                    
+                    // Extract PR number from merge commit message
+                    def commitMsg = sh(script: "git log -1 --pretty=%s", returnStdout: true).trim()
+                    def prNumberMatch = (commitMsg =~ /#(\d+)/)
+                    
+                    if (prNumberMatch) {
+                        def prNumber = prNumberMatch[0][1]
+                        echo "PR Number: ${prNumber}"
+                        
+                        withCredentials([
+                            usernamePassword(credentialsId: 'GITHUB_PAT',
+                                           usernameVariable: 'GITHUB_USERNAME',
+                                           passwordVariable: 'GITHUB_PAT')
+                        ]) {
+                            sh """
+                                pip3 install requests --quiet --break-system-packages
+                                export GITHUB_PAT="${GITHUB_PAT}"
+                                python3 pr_merge_handler.py --pr-number ${prNumber} --action merged
+                                
+                                echo "=========================================="
+                                echo "✅ Learning system updated for PR #${prNumber}"
+                                echo "   - Root causes recorded as successful"
+                                echo "   - Confidence levels may have been promoted"
+                                echo "=========================================="
+                            """
+                        }
+                    } else {
+                        echo "⚠️ Could not extract PR number from merge commit"
                     }
                 }
             }
