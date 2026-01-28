@@ -126,12 +126,17 @@ pipeline {
                 script {
                     echo "🔀 Low-confidence fix PR merged - updating learning system..."
                     
-                    // Extract PR number from merge commit message
-                    def commitMsg = sh(script: "git log -1 --pretty=%s", returnStdout: true).trim()
-                    def prNumberMatch = (commitMsg =~ /#(\d+)/)
+                    // Extract PR number from merge commit message using shell
+                    // Avoids non-serializable Matcher object in Groovy
+                    def prNumber = sh(
+                        script: '''
+                            COMMIT_MSG=$(git log -1 --pretty=%s)
+                            echo "$COMMIT_MSG" | grep -oP '#\\K\\d+' | head -1
+                        ''',
+                        returnStdout: true
+                    ).trim()
                     
-                    if (prNumberMatch) {
-                        def prNumber = prNumberMatch[0][1]
+                    if (prNumber) {
                         echo "PR Number: ${prNumber}"
                         
                         withCredentials([
@@ -139,17 +144,17 @@ pipeline {
                                            usernameVariable: 'GITHUB_USERNAME',
                                            passwordVariable: 'GITHUB_PAT')
                         ]) {
-                            sh """
+                            // Use single quotes to avoid Groovy string interpolation with secrets
+                            sh '''
                                 pip3 install requests --quiet --break-system-packages
-                                export GITHUB_PAT="${GITHUB_PAT}"
-                                python3 pr_merge_handler.py --pr-number ${prNumber} --action merged
+                                python3 pr_merge_handler.py --pr-number ''' + prNumber + ''' --action merged
                                 
                                 echo "=========================================="
-                                echo "✅ Learning system updated for PR #${prNumber}"
+                                echo "✅ Learning system updated for PR #''' + prNumber + '''"
                                 echo "   - Root causes recorded as successful"
                                 echo "   - Confidence levels may have been promoted"
                                 echo "=========================================="
-                            """
+                            '''
                         }
                     } else {
                         echo "⚠️ Could not extract PR number from merge commit"
