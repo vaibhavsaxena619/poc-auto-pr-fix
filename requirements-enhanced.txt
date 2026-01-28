@@ -1,0 +1,27 @@
+# CI/CD Build Automation System Requirements
+# Install with: pip install -r requirements-enhanced.txt
+
+# Core dependencies (existing)
+openai>=1.0.0          # Azure OpenAI API client
+requests>=2.31.0       # HTTP requests for GitHub API
+
+# Enhanced system dependencies
+python-dotenv>=1.0.0   # Load environment variables from .env file
+
+# Optional but recommended
+PyGithub>=2.1.0        # GitHub API library (alternative to requests)
+pyyaml>=6.0            # YAML parsing for config
+colorama>=0.4.6        # Colored terminal output
+
+# For development/testing
+pytest>=7.0            # Unit testing
+pytest-cov>=4.1.0      # Coverage reports
+black>=23.0            # Code formatting
+flake8>=6.0            # Linting
+mypy>=1.0              # Type checking
+
+# System requirements (not pip installable):
+# - Python 3.9+
+# - Git 2.0+
+# - OpenJDK 11+ (for javac)
+# - SMTP access (for email notifications)
