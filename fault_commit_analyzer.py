@@ -470,8 +470,7 @@ CORRECTED CODE:
                         "content": prompt
                     }
                 ],
-                max_completion_tokens=1000,
-                temperature=0.5
+                max_completion_tokens=1000
             )
             
             suggestion = response.choices[0].message.content.strip()
