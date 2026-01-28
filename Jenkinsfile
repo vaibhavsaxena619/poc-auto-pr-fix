@@ -336,29 +336,7 @@ EOF
             }
         }
 
-        // ==========================================
-        // OTHER BRANCHES: Skipped
-        // ==========================================
-        stage('Other Branches - Skipped') {
-            when {
-                allOf {
-                    not {
-                        anyOf {
-                            branch 'Dev_Low'
-                            branch 'Dev_High'
-                            branch 'Dev_Poc_V1'
-                            branch 'Release'
-                        }
-                    }
-                    expression { return env.CHANGE_ID == null }
-                }
-            }
-            steps {
-                script {
-                    echo "⊘ Branch '${BRANCH_NAME}': No action (only Dev and Release branches are processed)"
-                }
-            }
-        }
+
     }
 
     post {
@@ -375,8 +353,8 @@ EOF
                     echo "✓ SUCCESS: PR #${env.CHANGE_ID} - Code review posted"
                 } else if (env.BRANCH_NAME == 'Release') {
                     echo "✓ SUCCESS: Release build completed"
-                } else if (env.BRANCH_NAME != 'Release') {
-                    echo "ℹ ${env.BRANCH_NAME}: No build triggered (as expected)"
+                } else {
+                    echo "ℹ ${env.BRANCH_NAME}: No build triggered (dev branch - as expected)"
                 }
             }
         }

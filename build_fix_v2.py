@@ -378,24 +378,30 @@ def verify_fix(source_file: str) -> bool:
         return False
 
 
-def create_low_confidence_pr(source_file: str, fixed_code: str, 
-                             low_conf_errors: List[ErrorInfo],
-                             error_msg: str,
-                             original_author: str = None) -> bool:
+def create_pr_for_low_confidence_fix(source_file: str, fixed_code: str, 
+                                     low_conf_errors: List[ErrorInfo], 
+                                     original_author: str = None) -> bool:
     """
-    Create a PR with LLM fix suggestion for low-confidence errors.
+    Create a PR with LLM-generated fix for low-confidence errors.
+    
+    The fix requires manual review before merging to Release.
     """
     try:
+        # Get current branch to use as base
+        current_branch_result = subprocess.run(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        base_branch = current_branch_result.stdout.strip() if current_branch_result.returncode == 0 else 'Release'
+        
         env = os.environ.copy()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        new_branch = f"fix/low-confidence-errors_{timestamp}"
+        new_branch = f"fix/low-confidence-fix_{timestamp}"
         
         print(f"  Creating fix branch: {new_branch}")
-        
-        # Get current branch
-        result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                              capture_output=True, text=True, env=env)
-        base_branch = result.stdout.strip() if result.returncode == 0 else 'Release'
+        print(f"  [LOW-CONFIDENCE FIX - REQUIRES MANUAL REVIEW]")
         
         # Configure git
         subprocess.run(['git', 'config', 'user.email', 'build-automation@jenkins.local'], 
@@ -407,12 +413,21 @@ def create_low_confidence_pr(source_file: str, fixed_code: str,
         subprocess.run(['git', 'checkout', '-b', new_branch], 
                       check=True, capture_output=True, env=env)
         
-        # Apply LLM suggested fix
+        # Apply LLM-generated fix
         with open(source_file, 'w', encoding='utf-8') as f:
             f.write(fixed_code)
         
-        # Commit
-        commit_msg = f"Fix: LLM-suggested fix for {len(low_conf_errors)} low-confidence compilation errors"
+        # Generate detailed commit message with error info
+        error_summary = '\n'.join([f"- {e.category} ({e.confidence:.0%}): {e.error_msg[:100]}..." 
+                                   for e in low_conf_errors[:3]])  # First 3 errors
+        
+        commit_msg = f"""Fix: Low-confidence compilation errors (REQUIRES REVIEW)
+
+{len(low_conf_errors)} low-confidence error(s) detected and fixed by LLM:
+{error_summary}
+
+This fix requires manual review before merging."""
+        
         subprocess.run(['git', 'add', source_file], check=True, capture_output=True, env=env)
         subprocess.run(['git', 'commit', '-m', commit_msg], 
                       check=True, capture_output=True, env=env)
@@ -429,67 +444,72 @@ def create_low_confidence_pr(source_file: str, fixed_code: str,
         
         print(f"  ✓ Branch pushed: {new_branch}")
         
-        # Create PR body with error details and LLM suggestion
-        pr_body = f"""## Low-Confidence Compilation Errors - Manual Review Required
+        # Create PR with detailed error analysis
+        pr_title = f"🔧 Low-Confidence Fix: {len(low_conf_errors)} Issue(s) - REQUIRES REVIEW"
+        pr_body = f"""## 🤖 Auto-Generated Fix - Low Confidence Errors
 
-This PR contains an LLM-generated fix suggestion for **{len(low_conf_errors)}** low-confidence compilation errors.
+This PR contains an LLM-generated fix for **{len(low_conf_errors)} low-confidence** compilation error(s).
 
-### ⚠️ Manual Review Required
-These errors require domain knowledge and manual verification:
+⚠️ **IMPORTANT**: These errors require domain knowledge and careful manual review before merging.
+
+### Error Details
 
 """
         
         for i, error in enumerate(low_conf_errors, 1):
             pr_body += f"\n**Issue {i}:** `{error.category}` (Confidence: {error.confidence:.0%})\n"
-            pr_body += f"```\n{error.error_msg[:300]}\n```\n"
+            pr_body += f"```\n{error.error_msg[:400]}\n```\n"
         
-        pr_body += f"\n### 🤖 LLM Fix Suggestion\n"
-        pr_body += f"The AI has analyzed the errors and proposed a fix in this PR.\n"
-        pr_body += f"**Please review carefully before merging.**\n\n"
+        pr_body += f"""\n### Review Checklist
+
+- [ ] Verify the fix doesn't alter business logic
+- [ ] Check for potential runtime issues
+- [ ] Validate edge cases and error handling
+- [ ] Run full test suite
+- [ ] Review security implications
+
+"""
         
         # Tag original author
         if original_author:
-            pr_body += f"CC: @{original_author} - Please review the LLM-suggested fix\n"
+            pr_body += f"\n📧 **Assigned to**: @{original_author}\n"
         
-        pr_body += "\n---\n*Generated by Build Automation Pipeline*"
+        pr_body += "\n---\n*🤖 Generated by Build Automation Pipeline with GPT-5*"
         
         # Create PR via GitHub API
         try:
             import requests
             
-            repo = "vaibhavsaxena619/poc-auto-pr-fix"
-            api_url = f"https://api.github.com/repos/{repo}/pulls"
-            github_pat = os.getenv('GITHUB_PAT', '')
+            github_api_url = "https://api.github.com/repos/vaibhavsaxena619/poc-auto-pr-fix/pulls"
+            headers = {
+                'Authorization': f'token {github_pat}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
             
-            if github_pat:
-                headers = {
-                    "Authorization": f"token {github_pat}",
-                    "Accept": "application/vnd.github.v3+json"
-                }
+            pr_data = {
+                'title': pr_title,
+                'body': pr_body,
+                'head': new_branch,
+                'base': base_branch  # Use detected base branch instead of hardcoded 'Release'
+            }
+            
+            response = requests.post(github_api_url, headers=headers, json=pr_data, timeout=30)
+            
+            if response.status_code == 201:
+                pr_number = response.json()['number']
+                pr_url = response.json()['html_url']
+                print(f"  ✓ PR #{pr_number} created: {pr_url}")
+                return True
+            else:
+                print(f"  ✗ Failed to create PR: {response.status_code} - {response.text}")
+                return False
                 
-                payload = {
-                    "title": f"[LLM Fix] Low-confidence errors - Manual review needed ({len(low_conf_errors)} issues)",
-                    "head": new_branch,
-                    "base": base_branch,
-                    "body": pr_body
-                }
-                
-                response = requests.post(api_url, json=payload, headers=headers)
-                
-                if response.status_code == 201:
-                    pr_data = response.json()
-                    pr_number = pr_data['number']
-                    print(f"  ✓ PR #{pr_number} created: {base_branch} ← {new_branch}")
-                    return True
-                else:
-                    print(f"  ⚠️ PR creation failed: {response.status_code}")
         except Exception as e:
-            print(f"  ⚠️ PR creation error: {e}")
-        
-        return False
-        
+            print(f"  ✗ Error creating PR: {e}")
+            return False
+            
     except Exception as e:
-        print(f"  ⚠️ Failed to create PR branch: {e}")
+        print(f"  ✗ Error creating fix branch: {e}")
         return False
 
 
@@ -497,7 +517,7 @@ def create_fix_branch_for_mixed_errors(source_file: str, fixed_code_high_conf: s
                                        low_conf_errors: List[ErrorInfo], 
                                        original_author: str = None) -> bool:
     """
-    NEW: Create a fix branch with only high-confidence fixes.
+    Create a fix branch with only high-confidence fixes.
     
     Leaves low-confidence errors in place and creates PR with tags for original author.
     """
@@ -790,47 +810,56 @@ def main():
                     create_fix_branch_for_mixed_errors(source_file, fixed_code, low_conf_errors, original_author)
                     sys.exit(0)
         else:
-            print(f"  ℹ️ Only low-confidence errors found - getting LLM fix suggestion...")
+            print(f"  ℹ️ Only low-confidence errors found - generating LLM fix and creating PR...")
             
-            # Get LLM fix suggestion for low-confidence errors
+            # Generate LLM fix for low-confidence errors
             source_code = read_source_file(source_file)
             error_msg_combined = '\n'.join([e.error_msg for e in low_conf_errors])
+            
+            print("  🤖 Calling LLM to generate fix suggestion...")
             fixed_code = send_to_azure_openai(error_msg_combined, source_code,
                                              api_key, endpoint, api_version, deployment_name)
             
             if fixed_code:
-                print(f"  ✅ LLM fix suggestion generated")
-                print(f"  📝 Creating PR with fix suggestion for manual review...")
-                
-                # Apply fix temporarily to create branch
+                print("  ✅ LLM generated fix suggestion")
                 apply_fix(source_file, fixed_code)
+                
+                # Create branch and PR with the fix
                 original_author = os.getenv('PR_AUTHOR', None)
+                success = create_pr_for_low_confidence_fix(source_file, fixed_code, low_conf_errors, original_author)
                 
-                # Create PR with LLM fix suggestion
-                if create_low_confidence_pr(source_file, fixed_code, low_conf_errors, error_msg_combined, original_author):
-                    print(f"  ✅ PR created successfully for low-confidence issues")
+                if success:
+                    print("✓ Created branch and PR with low-confidence fix for manual review")
                 else:
-                    print(f"  ⚠️ Failed to create PR, but fix suggestion was generated")
+                    print("⚠️ Failed to create PR - falling back to commit history search")
+                    
+                    # Search for last good commit as fallback
+                    good_commit, found = find_last_good_commit(source_file, MAX_COMMIT_HISTORY_SEARCH)
+                    
+                    if found:
+                        print(f"  ✅ Found good commit: {good_commit}")
+                        print(f"  Building from stable commit instead...")
+                        
+                        subprocess.run(['git', 'checkout', good_commit], capture_output=True, check=False)
+                        
+                        if verify_fix(source_file):
+                            print("✓ Verified: Good commit builds successfully")
+                            sys.exit(0)
             else:
-                print(f"  ⚠️ Could not generate LLM fix suggestion")
-            
-            # Now search for last good commit to build from
-            print(f"\n  🔍 Searching commit history for last good commit to build...")
-            good_commit, found = find_last_good_commit(source_file, MAX_COMMIT_HISTORY_SEARCH)
-            
-            if found:
-                print(f"  ✅ Found good commit: {good_commit}")
-                print(f"  Building from stable commit instead...")
+                print("  ⚠️ LLM failed to generate fix - searching commit history...")
                 
-                # Checkout that commit
-                subprocess.run(['git', 'checkout', good_commit], capture_output=True, check=False)
+                # Search for last good commit
+                good_commit, found = find_last_good_commit(source_file, MAX_COMMIT_HISTORY_SEARCH)
                 
-                # Verify it compiles
-                if verify_fix(source_file):
-                    print("✓ Verified: Good commit builds successfully")
-                    sys.exit(0)
-            else:
-                print(f"  ⚠️ Could not find a good commit to build from")
+                if found:
+                    print(f"  ✅ Found good commit: {good_commit}")
+                    print(f"  Building from stable commit instead...")
+                    
+                    subprocess.run(['git', 'checkout', good_commit], capture_output=True, check=False)
+                    
+                    if verify_fix(source_file):
+                        print("✓ Verified: Good commit builds successfully")
+                        sys.exit(0)
             
             sys.exit(0)
     else:
