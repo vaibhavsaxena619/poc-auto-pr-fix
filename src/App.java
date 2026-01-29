@@ -9,6 +9,7 @@ public class App {
         
         int x;
         x = 5; // Fixed: declared variable
-        System.out.println(x);
+        y = 10;
+        System.out.println(x+y);
     }
 }
