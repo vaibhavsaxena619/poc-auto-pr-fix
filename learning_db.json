@@ -2,10 +2,22 @@
   "metadata": {
     "version": "2.0",
     "created": "2026-01-29T00:00:00",
-    "last_updated": "2026-01-29T00:00:00",
-    "total_patterns": 0,
-    "promoted_patterns": 0,
+    "last_updated": "2026-01-29T16:10:00",
+    "total_patterns": 1,
+    "promoted_patterns": 1,
     "demoted_patterns": 0
   },
-  "root_causes": {}
+  "root_causes": {
+    "risky:business_logic": {
+      "confidence": "high",
+      "success_count": 4,
+      "failure_count": 0,
+      "consecutive_successes": 4,
+      "consecutive_failures": 0,
+      "total_attempts": 4,
+      "promoted_at": "2026-01-29T16:10:00",
+      "last_update": "2026-01-29T16:10:00",
+      "last_outcome": "success"
+    }
+  }
 }

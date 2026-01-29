@@ -297,6 +297,26 @@ class LearningDatabase:
         
         return self.save()
     
+    def get_pattern_confidence(self, category: str) -> Optional[float]:
+        """
+        Get the learned confidence score for a root cause category.
+        
+        Args:
+            category: Root cause classification (e.g., "risky:business_logic")
+        
+        Returns:
+            0.9 if promoted to HIGH confidence, None otherwise
+        """
+        if category not in self.data["root_causes"]:
+            return None
+        
+        pattern = self.data["root_causes"][category]
+        
+        if pattern.get("confidence") == "high":
+            return 0.9  # HIGH confidence
+        
+        return None  # Still LOW confidence
+    
     def check_promotion(self, root_cause: str) -> Tuple[bool, Optional[str]]:
         """
         Check if a root cause should be promoted to HIGH confidence.

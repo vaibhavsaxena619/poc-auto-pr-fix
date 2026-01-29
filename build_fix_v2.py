@@ -52,11 +52,11 @@ except ImportError:
 
 # Try to import learning database (optional)
 try:
-    from learning_classifier import LearningDatabase
+    from pr_outcome_monitor import LearningDatabase
     HAS_LEARNING_DB = True
 except ImportError:
     HAS_LEARNING_DB = False
-    print("WARNING: learning_classifier not available - learning features disabled")
+    print("WARNING: pr_outcome_monitor not available - learning features disabled")
 
 # === LOGGING ===
 logging.basicConfig(
