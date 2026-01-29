@@ -24,7 +24,13 @@ from pathlib import Path
 from typing import Dict, Tuple, List
 
 # Configuration
-LEARNING_DB_PATH = "error_learning.json"
+# Use environment variable for persistent storage, fallback to local path for backward compatibility
+LEARNING_DATA_DIR = os.getenv('LEARNING_DATA_DIR', '/var/jenkins_home/learning_data')
+LEARNING_DB_PATH = os.getenv('LEARNING_DB_PATH', os.path.join(LEARNING_DATA_DIR, 'learning_db.json'))
+
+# Ensure directory exists
+os.makedirs(os.path.dirname(LEARNING_DB_PATH) if os.path.dirname(LEARNING_DB_PATH) else '.', exist_ok=True)
+
 SUCCESS_THRESHOLD = 5  # Consecutive successes needed to promote
 FAILURE_THRESHOLD = 2  # Consecutive failures to demote back to LOW
 CONFIDENCE_BOOST_FACTOR = 0.05  # Each success adds 5% to base confidence (0.9 → 0.95)

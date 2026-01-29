@@ -18,6 +18,12 @@ pipeline {
         ENABLE_AUTO_FIX = "${env.ENABLE_AUTO_FIX ?: 'true'}"
         ENABLE_OPENAI_CALLS = "${env.ENABLE_OPENAI_CALLS ?: 'true'}"
         READ_ONLY_MODE = "${env.READ_ONLY_MODE ?: 'false'}"
+        
+        // === PERSISTENT STORAGE FOR LEARNING SYSTEM ===
+        // Store learning data outside workspace to persist across builds
+        LEARNING_DATA_DIR = "/var/jenkins_home/learning_data"
+        LEARNING_DB_PATH = "${LEARNING_DATA_DIR}/learning_db.json"
+        PR_TRACKING_PATH = "${LEARNING_DATA_DIR}/pr_tracking.json"
     }
 
     stages {
@@ -146,13 +152,21 @@ pipeline {
                         ]) {
                             // Use single quotes to avoid Groovy string interpolation with secrets
                             sh '''
+                                # Ensure persistent learning data directory exists
+                                mkdir -p "${LEARNING_DATA_DIR}"
+                                
                                 pip3 install requests --quiet --break-system-packages
+                                
+                                # Update learning system with persistent paths
+                                export PR_TRACKING_PATH="${PR_TRACKING_PATH}"
+                                export LEARNING_DB_PATH="${LEARNING_DB_PATH}"
                                 python3 pr_merge_handler.py --pr-number ''' + prNumber + ''' --action merged
                                 
                                 echo "=========================================="
                                 echo "✅ Learning system updated for PR #''' + prNumber + '''"
                                 echo "   - Root causes recorded as successful"
                                 echo "   - Confidence levels may have been promoted"
+                                echo "   - Storage: ${LEARNING_DB_PATH}"
                                 echo "=========================================="
                             '''
                         }
@@ -212,10 +226,15 @@ pipeline {
                                                    passwordVariable: 'GITHUB_PAT')
                                 ]) {
                                     sh '''
+                                        # Ensure persistent learning data directory exists
+                                        mkdir -p "${LEARNING_DATA_DIR}"
+                                        
                                         pip3 install openai requests --quiet --break-system-packages
                                         export ENABLE_AUTO_FIX="${ENABLE_AUTO_FIX}"
                                         export ENABLE_OPENAI_CALLS="${ENABLE_OPENAI_CALLS}"
                                         export READ_ONLY_MODE="${READ_ONLY_MODE}"
+                                        export LEARNING_DB_PATH="${LEARNING_DB_PATH}"
+                                        export PR_TRACKING_PATH="${PR_TRACKING_PATH}"
                                         python3 build_fix_v2.py src/App.java
                                     '''
                                 }

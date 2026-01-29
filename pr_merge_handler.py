@@ -76,6 +76,60 @@ class PRMergeHandler:
         
         logger.info("PR Merge Handler initialized")
     
+    def delete_merged_fix_branch(self, pr_data: Dict) -> bool:
+        """
+        Delete the source branch of a merged fix PR (auto-generated branches only).
+        
+        Args:
+            pr_data: PR data from GitHub API
+            
+        Returns:
+            True if branch was deleted or skip was intentional, False on error
+        """
+        try:
+            branch_name = pr_data.get('head', {}).get('ref')
+            base_branch = pr_data.get('base', {}).get('ref')
+            
+            if not branch_name:
+                logger.warning("  ⚠️ No branch name found in PR data")
+                return False
+            
+            # SAFETY: Only delete auto-generated fix branches
+            protected_branches = ['Release', 'Dev', 'Dev_Poc', 'Dev_Low', 'Dev_High', 'main', 'master']
+            
+            # Check if branch is protected
+            if branch_name in protected_branches:
+                logger.info(f"  🛡️ Skipping deletion of protected branch: {branch_name}")
+                return True
+            
+            # Only delete branches that match auto-fix pattern
+            if not branch_name.startswith('fix/'):
+                logger.info(f"  ⊘ Skipping non-fix branch: {branch_name}")
+                return True
+            
+            # Delete the branch via GitHub API
+            url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/git/refs/heads/{branch_name}"
+            headers = {
+                'Authorization': f'token {self.github_token}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            response = requests.delete(url, headers=headers)
+            
+            if response.status_code == 204:
+                logger.info(f"  🗑️ Successfully deleted branch: {branch_name}")
+                return True
+            elif response.status_code == 404:
+                logger.info(f"  ℹ️ Branch already deleted: {branch_name}")
+                return True
+            else:
+                logger.error(f"  ✗ Failed to delete branch {branch_name}: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"  ✗ Error deleting branch: {e}", exc_info=True)
+            return False
+    
     def extract_learning_metadata(self, pr_body: str) -> Optional[Dict]:
         """
         Extract learning metadata from PR body.
@@ -206,6 +260,9 @@ class PRMergeHandler:
                     merged_at=merged_at
                 )
                 logger.info(f"  ✅ Added PR #{pr_number} to tracker")
+            
+            # Delete the merged fix branch (auto-generated branches only)
+            self.delete_merged_fix_branch(pr_data)
             
             logger.info(f"✅ Successfully processed merged PR #{pr_number}")
             return True
