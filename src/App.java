@@ -8,7 +8,7 @@ public class App {
         System.out.println("Testing Jenkins PR automation!");
         
         int x = 5; // Fixed: declared variable
-        y = 7;
+        int y = 7;
         System.out.println(x+y);
     }
 }
