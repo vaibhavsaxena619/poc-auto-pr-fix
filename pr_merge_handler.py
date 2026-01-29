@@ -76,6 +76,72 @@ class PRMergeHandler:
         
         logger.info("PR Merge Handler initialized")
     
+    def commit_and_push_learning_data(self, pr_number: int) -> bool:
+        """
+        Commit and push learning database files to Git.
+        
+        Args:
+            pr_number: The PR number that triggered the update
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            import subprocess
+            
+            # Get the learning file paths
+            learning_db_path = os.getenv('LEARNING_DB_PATH', 'learning_db.json')
+            pr_tracking_path = os.getenv('PR_TRACKING_PATH', 'pr_tracking.json')
+            
+            # Check if files exist
+            if not os.path.exists(learning_db_path) and not os.path.exists(pr_tracking_path):
+                logger.warning("  ⚠️ No learning files to commit")
+                return False
+            
+            # Configure git user (needed for commit)
+            subprocess.run(['git', 'config', 'user.name', 'Jenkins CI'], check=False)
+            subprocess.run(['git', 'config', 'user.email', 'jenkins@poc-auto-pr-fix'], check=False)
+            
+            # Stage the learning files
+            if os.path.exists(learning_db_path):
+                subprocess.run(['git', 'add', learning_db_path], check=True)
+                logger.info(f"  ✓ Staged {learning_db_path}")
+            
+            if os.path.exists(pr_tracking_path):
+                subprocess.run(['git', 'add', pr_tracking_path], check=True)
+                logger.info(f"  ✓ Staged {pr_tracking_path}")
+            
+            # Check if there are changes to commit
+            result = subprocess.run(['git', 'diff', '--staged', '--quiet'], capture_output=True)
+            if result.returncode == 0:
+                logger.info("  ℹ️ No changes to commit")
+                return True
+            
+            # Commit the changes
+            commit_msg = f"Update learning system after PR #{pr_number} merge"
+            subprocess.run(['git', 'commit', '-m', commit_msg], check=True)
+            logger.info(f"  ✓ Committed learning data: {commit_msg}")
+            
+            # Push to current branch
+            current_branch = subprocess.run(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=True
+            ).stdout.strip()
+            
+            subprocess.run(['git', 'push', 'origin', current_branch], check=True)
+            logger.info(f"  ✓ Pushed to origin/{current_branch}")
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"  ✗ Git operation failed: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"  ✗ Error committing learning data: {e}", exc_info=True)
+            return False
+    
     def delete_merged_fix_branch(self, pr_data: Dict) -> bool:
         """
         Delete the source branch of a merged fix PR (auto-generated branches only).
@@ -263,6 +329,10 @@ class PRMergeHandler:
             
             # Delete the merged fix branch (auto-generated branches only)
             self.delete_merged_fix_branch(pr_data)
+            
+            # Commit and push learning data to Git
+            logger.info(f"  💾 Committing learning data to Git...")
+            self.commit_and_push_learning_data(pr_number)
             
             logger.info(f"✅ Successfully processed merged PR #{pr_number}")
             return True

@@ -70,13 +70,10 @@ GITHUB_PAT = os.getenv('GITHUB_PAT', '')
 REPO_OWNER = os.getenv('REPO_OWNER', 'vaibhavsaxena619')
 REPO_NAME = os.getenv('REPO_NAME', 'poc-auto-pr-fix')
 
-# Persistent storage paths (outside workspace to survive builds)
-LEARNING_DATA_DIR = os.getenv('LEARNING_DATA_DIR', '/var/jenkins_home/learning_data')
-PR_TRACKING_PATH = os.getenv('PR_TRACKING_PATH', os.path.join(LEARNING_DATA_DIR, 'pr_tracking.json'))
-LEARNING_DB_PATH = os.getenv('LEARNING_DB_PATH', os.path.join(LEARNING_DATA_DIR, 'learning_db.json'))
-
-# Ensure directory exists
-os.makedirs(LEARNING_DATA_DIR, exist_ok=True)
+# Store in Git workspace (tracked files)
+WORKSPACE_DIR = os.getenv('WORKSPACE', os.getcwd())
+PR_TRACKING_PATH = os.getenv('PR_TRACKING_PATH', os.path.join(WORKSPACE_DIR, 'pr_tracking.json'))
+LEARNING_DB_PATH = os.getenv('LEARNING_DB_PATH', os.path.join(WORKSPACE_DIR, 'learning_db.json'))
 
 # Learning thresholds
 SUCCESS_THRESHOLD = int(os.getenv('SUCCESS_THRESHOLD', '3'))  # Promote after 3 successes
