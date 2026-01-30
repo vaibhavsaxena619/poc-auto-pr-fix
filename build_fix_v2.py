@@ -1049,12 +1049,8 @@ def main():
             print("  ℹ️ High-confidence fix didn't compile, creating PR for manual review...")
             
             # Fallback: Create PR instead of failing
-            root_causes = [err.root_cause for err in high_conf_errors]
-            error_messages = [err.error_message for err in high_conf_errors]
-            
-            pr_result = create_low_confidence_pr(
-                source_file, fixed_code, root_causes, error_messages,
-                api_key, endpoint, api_version, deployment_name
+            pr_result = create_pr_for_low_confidence_fix(
+                source_file, fixed_code, high_conf_errors
             )
             
             if pr_result:
