@@ -1054,9 +1054,28 @@ def main():
             )
             
             if pr_result:
-                # Restore original file so Jenkins doesn't try to verify the bad fix
-                print("  ℹ️ Restoring original file...")
-                apply_fix(source_file, source_code)
+                # Restore file from last good commit so Jenkins doesn't fail on verification
+                print("  ℹ️ Restoring file from last good commit...")
+                try:
+                    # Find the last good commit
+                    good_commit, found = find_last_good_commit(source_file, MAX_COMMIT_HISTORY_SEARCH)
+                    if found:
+                        # Restore from good commit
+                        result = subprocess.run(
+                            ['git', 'checkout', good_commit, '--', source_file],
+                            capture_output=True,
+                            text=True,
+                            check=False
+                        )
+                        if result.returncode == 0:
+                            print(f"  ✓ Restored from commit {good_commit[:7]}")
+                        else:
+                            print(f"  ⚠️ Could not restore from good commit, using current version")
+                    else:
+                        print(f"  ⚠️ Could not find good commit, using current version")
+                except Exception as e:
+                    print(f"  ⚠️ Error restoring file: {e}")
+                
                 print("  ✓ Created PR for manual review due to verification failure")
                 sys.exit(0)  # Success - PR created as fallback
             else:
