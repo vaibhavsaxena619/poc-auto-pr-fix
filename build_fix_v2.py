@@ -143,49 +143,122 @@ def parse_all_errors(error_message: str) -> List[str]:
     return [e for e in errors if e.strip()]
 
 
-def classify_error_confidence(error_message: str) -> Tuple[str, float]:
+def generate_error_signature(error_message: str, source_file: str = "") -> str:
     """
-    Classify error as safe (high confidence) or risky (low confidence).
+    Generate a normalized error signature for pattern matching.
     
-    UPDATED: Now checks learning database for previously promoted patterns.
+    This creates a stable pattern that can match similar errors across different contexts.
     
-    Returns: (category, confidence_score: 0.0-1.0)
+    Args:
+        error_message: The raw compiler error message
+        source_file: Optional source file path
+        
+    Returns:
+        Normalized error signature for matching
+    """
+    # Extract key components
+    error_lower = error_message.lower()
+    
+    # Extract error type
+    error_type = "unknown"
+    if "cannot find symbol" in error_lower:
+        error_type = "cannot_find_symbol"
+        # Extract what kind of symbol
+        if "variable" in error_lower:
+            error_type += ":variable"
+        elif "method" in error_lower:
+            error_type += ":method"
+        elif "class" in error_lower:
+            error_type += ":class"
+    elif "incompatible types" in error_lower:
+        error_type = "incompatible_types"
+    elif "missing return statement" in error_lower:
+        error_type = "missing_return"
+    elif "unreachable statement" in error_lower:
+        error_type = "unreachable_code"
+    elif "illegal start of expression" in error_lower:
+        error_type = "syntax_error:illegal_start"
+    
+    # Extract file base name (without extension)
+    file_base = ""
+    if source_file:
+        file_base = os.path.splitext(os.path.basename(source_file))[0]
+    
+    # Create signature
+    signature = f"{error_type}"
+    if file_base:
+        signature += f"|{file_base}"
+    
+    return signature
+
+
+def classify_error_confidence(error_message: str, source_file: str = "") -> Tuple[str, float, str]:
+    """
+    Classify error with LEARNED_HIGH vs RULE_HIGH logic.
+    
+    UPDATED: Now checks learning database FIRST for previously promoted patterns
+    using normalized error signatures.
+    
+    Returns: (category, confidence_score, match_type)
+    - match_type: "LEARNED_HIGH", "RULE_HIGH", or "LOW"
     - High confidence (0.8+): Safe to auto-fix
     - Low confidence (<0.8): Requires manual review
     """
     error_lower = error_message.lower()
     
-    # SPECIAL CASE: Check for method/variable symbol errors first
-    # These are risky even if they match "cannot find symbol"
-    if re.search(r'symbol:\s*(method|variable)', error_lower):
-        return ("risky:business_logic", 0.1)  # Low confidence
+    # Generate normalized error signature
+    error_signature = generate_error_signature(error_message, source_file)
     
-    # Check risky patterns (that aren't method/variable symbols)
+    # STEP 1: Check learning database FIRST for promoted patterns (LEARNED_HIGH)
+    if HAS_LEARNING_DB and ENABLE_LEARNING:
+        try:
+            learning_db = LearningDatabase()
+            
+            # Try exact signature match first
+            learned_pattern = learning_db.get_pattern_by_signature(error_signature)
+            if learned_pattern and learned_pattern.get("confidence") == "high":
+                confidence = 0.9
+                category = learned_pattern.get("root_cause", "risky:business_logic")
+                print(f"  🎓 LEARNED_HIGH: {category} (signature: {error_signature})")
+                print(f"     Seen {learned_pattern.get('times_seen', 0)} times, "
+                      f"{learned_pattern.get('success_count', 0)} successes")
+                return (category, confidence, "LEARNED_HIGH")
+            
+            # Fallback: Check by root cause category
+            if re.search(r'symbol:\s*(method|variable)', error_lower):
+                category = "risky:business_logic"
+                learned_confidence = learning_db.get_pattern_confidence(category)
+                if learned_confidence and learned_confidence >= 0.9:
+                    print(f"  🎓 LEARNED_HIGH: {category} (fallback match)")
+                    return (category, learned_confidence, "LEARNED_HIGH")
+        except Exception as e:
+            logging.debug(f"Could not check learning DB: {e}")
+    
+    # STEP 2: Apply RULE_HIGH for safe compiler fixes
+    # Check safe patterns first
+    for safe_category, pattern in SAFE_ERROR_PATTERNS.items():
+        if re.search(pattern, error_lower):
+            category = f"safe:{safe_category}"
+            print(f"  ✅ RULE_HIGH: {category}")
+            return (category, 0.9, "RULE_HIGH")
+    
+    # STEP 3: Default to LOW confidence for risky patterns
+    # SPECIAL CASE: Check for method/variable symbol errors
+    if re.search(r'symbol:\s*(method|variable)', error_lower):
+        category = "risky:business_logic"
+        print(f"  ⚠️  LOW: {category} (not learned yet)")
+        return (category, 0.1, "LOW")
+    
+    # Check risky patterns
     for risk_category, pattern in RISKY_ERROR_PATTERNS.items():
         if re.search(pattern, error_lower):
             category = f"risky:{risk_category}"
-            confidence = 0.1  # Low confidence
-            
-            # Check if this pattern has been learned as HIGH confidence
-            if HAS_LEARNING_DB and ENABLE_LEARNING:
-                try:
-                    learning_db = LearningDatabase()
-                    learned_confidence = learning_db.get_pattern_confidence(category)
-                    if learned_confidence and learned_confidence > confidence:
-                        print(f"  📚 LEARNED: {category} promoted to {learned_confidence:.0%}")
-                        return (category, learned_confidence)
-                except Exception as e:
-                    logging.debug(f"Could not check learning DB: {e}")
-            
-            return (category, confidence)
-    
-    # Check safe patterns
-    for safe_category, pattern in SAFE_ERROR_PATTERNS.items():
-        if re.search(pattern, error_lower):
-            return (f"safe:{safe_category}", 0.9)  # High confidence
+            print(f"  ⚠️  LOW: {category}")
+            return (category, 0.1, "LOW")
     
     # Unknown error: default to low confidence
-    return ("unknown", 0.5)
+    print(f"  ⚠️  LOW: unknown error type")
+    return ("unknown", 0.5, "LOW")
 
 
 def find_last_good_commit(source_file: str, max_search: int = 10) -> Tuple[str, bool]:
@@ -338,11 +411,73 @@ CURRENT CODE:
 
 RESPONSE: Provide COMPLETE corrected Java code. Preserve all sections."""
         
+        # NEW: Industry-Standard Safe Mode Prompt
+        safe_mode_prompt = f"""🎯 ROLE: Senior Java Compiler Error Repair Assistant (SAFE FIX MODE)
+
+Your job is to make the MINIMUM possible code changes required STRICTLY to resolve compilation errors.
+
+❌ NEVER DO:
+- Add new features
+- Refactor working code
+- Rename methods/classes (unless required for compiler error)
+- Change logic, conditions, loops, or calculations
+- Remove code (unless provably unreachable or invalid)
+- Introduce placeholder implementations that change runtime behavior
+
+✅ YOU MAY FIX ONLY:
+
+1. Syntax & Structure
+   - Syntax errors, missing imports, package mismatches
+   - Class name ↔ filename mismatch
+   - Duplicate definitions, illegal forward references
+
+2. Type System
+   - Type mismatch, generic type issues
+   - Static vs instance context misuse
+
+3. Symbols & Declarations
+   - Undeclared variables, scope issues
+   - Method not found (ONLY if obvious signature mismatch)
+   - Missing interface implementations
+   - Abstract methods not implemented
+
+4. Java Rules & Contracts
+   - Access modifier violations
+   - Final variable reassignment (remove reassignment only)
+   - Missing return statement (add minimal valid return)
+   - Unreachable code (remove only)
+   - Checked exceptions (add throws, not try/catch)
+
+🧩 FIXING RULES:
+- Make the smallest change possible
+- Prefer adding missing pieces over modifying existing logic
+- If uncertain about intent → DO NOT GUESS, mark as UNRESOLVED
+
+📝 OUTPUT FORMAT (MANDATORY):
+
+✅ FIXED FILE
+[full corrected file content - NO CODE MARKERS, NO COMMENTS]
+
+🛠 CHANGES MADE
+- Line X: [specific change description]
+- Line Y: [specific change description]
+
+🚫 UNRESOLVED (REQUIRES HUMAN REVIEW)
+[List any issues that require business logic decisions]
+
+---
+
+ERROR:
+{error_message}
+
+CURRENT CODE:
+{source_code}"""
+        
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[
-                {"role": "system", "content": "You are a Java expert that fixes compilation errors. Always preserve code."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "You are a Java compiler error repair specialist operating in SAFE FIX MODE. Fix only compilation issues. Never change business logic or application behavior."},
+                {"role": "user", "content": safe_mode_prompt}
             ],
             max_completion_tokens=2000
         )
@@ -777,15 +912,15 @@ def main():
     low_conf_errors = []
     
     for error_text in all_errors:
-        category, confidence = classify_error_confidence(error_text)
+        category, confidence, match_type = classify_error_confidence(error_text, source_file)
         error_info = ErrorInfo(error_text, category, confidence)
         
         if confidence >= 0.8:
             high_conf_errors.append(error_info)
-            print(f"  ✓ HIGH-CONFIDENCE: {category} ({confidence:.0%})")
+            print(f"  ✓ {match_type}: {category} ({confidence:.0%})")
         else:
             low_conf_errors.append(error_info)
-            print(f"  ⚠️  LOW-CONFIDENCE: {category} ({confidence:.0%})")
+            print(f"  ⚠️  {match_type}: {category} ({confidence:.0%})")
     
     # === STEP 4: DECISION LOGIC (NEW) ===
     if low_conf_errors:

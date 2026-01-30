@@ -250,13 +250,17 @@ class LearningDatabase:
             logger.error(f"Failed to save learning database: {e}")
             return False
     
-    def record_outcome(self, root_cause: str, success: bool) -> bool:
+    def record_outcome(self, root_cause: str, success: bool, error_signature: str = None, 
+                      fix_summary: str = None, error_message: str = None) -> bool:
         """
-        Record the outcome of a PR.
+        Record the outcome of a PR with enhanced metadata.
         
         Args:
             root_cause: Root cause classification
             success: True if PR merged successfully, False if failed/closed
+            error_signature: Normalized error signature for pattern matching
+            fix_summary: Human-readable description of the fix
+            error_message: Original error message
         
         Returns:
             True if recorded successfully
@@ -272,18 +276,32 @@ class LearningDatabase:
                 "consecutive_failures": 0,
                 "total_attempts": 0,
                 "promoted_at": None,
-                "last_update": datetime.now().isoformat()
+                "last_update": datetime.now().isoformat(),
+                "error_signature": error_signature or "",
+                "fix_type": self._infer_fix_type(root_cause),
+                "times_seen": 0,
+                "fix_summary": fix_summary or ""
             }
             self.data["metadata"]["total_patterns"] += 1
         
         pattern = self.data["root_causes"][root_cause]
         pattern["total_attempts"] += 1
+        pattern["times_seen"] = pattern.get("times_seen", 0) + 1
         pattern["last_update"] = datetime.now().isoformat()
+        
+        # Update enhanced fields if provided
+        if error_signature and not pattern.get("error_signature"):
+            pattern["error_signature"] = error_signature
+        if fix_summary and not pattern.get("fix_summary"):
+            pattern["fix_summary"] = fix_summary
+        if error_message:
+            pattern["last_error"] = error_message
         
         if success:
             pattern["success_count"] += 1
             pattern["consecutive_successes"] += 1
             pattern["consecutive_failures"] = 0
+            pattern["last_outcome"] = "success"
             
             logger.info(f"  {root_cause}: {pattern['success_count']} successes, "
                        f"{pattern['consecutive_successes']} consecutive")
@@ -291,11 +309,23 @@ class LearningDatabase:
             pattern["failure_count"] += 1
             pattern["consecutive_successes"] = 0
             pattern["consecutive_failures"] += 1
+            pattern["last_outcome"] = "failure"
             
             logger.info(f"  {root_cause}: {pattern['failure_count']} failures, "
                        f"{pattern['consecutive_failures']} consecutive")
         
         return self.save()
+    
+    def _infer_fix_type(self, root_cause: str) -> str:
+        """Infer fix type from root cause category."""
+        if "business_logic" in root_cause:
+            return "variable_declaration"
+        elif "missing_import" in root_cause:
+            return "import_addition"
+        elif "type_mismatch" in root_cause:
+            return "type_correction"
+        else:
+            return "unknown"
     
     def get_pattern_confidence(self, category: str) -> Optional[float]:
         """
@@ -316,6 +346,28 @@ class LearningDatabase:
             return 0.9  # HIGH confidence
         
         return None  # Still LOW confidence
+    
+    def get_pattern_by_signature(self, error_signature: str) -> Optional[Dict]:
+        """
+        Get pattern data by normalized error signature.
+        
+        Args:
+            error_signature: Normalized error signature (e.g., "cannot_find_symbol:variable|App")
+        
+        Returns:
+            Pattern dictionary if found and promoted, None otherwise
+        """
+        # Search through all root causes for matching signature
+        for root_cause, pattern_data in self.data["root_causes"].items():
+            # Check if pattern has a matching error_signature field
+            if pattern_data.get("error_signature") == error_signature:
+                return pattern_data
+            
+            # Also check if the root_cause itself matches (for backward compatibility)
+            if root_cause == error_signature:
+                return pattern_data
+        
+        return None
     
     def check_promotion(self, root_cause: str) -> Tuple[bool, Optional[str]]:
         """

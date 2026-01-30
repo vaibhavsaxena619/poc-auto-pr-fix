@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "version": "2.0",
+    "version": "2.1",
     "created": "2026-01-29T00:00:00",
-    "last_updated": "2026-01-29T16:10:00",
+    "last_updated": "2026-01-30T00:00:00",
     "total_patterns": 1,
     "promoted_patterns": 1,
     "demoted_patterns": 0
@@ -16,8 +16,12 @@
       "consecutive_failures": 0,
       "total_attempts": 4,
       "promoted_at": "2026-01-29T16:10:00",
-      "last_update": "2026-01-29T16:10:00",
-      "last_outcome": "success"
+      "last_update": "2026-01-30T00:00:00",
+      "last_outcome": "success",
+      "error_signature": "cannot_find_symbol:variable",
+      "fix_type": "add_variable_declaration",
+      "times_seen": 4,
+      "fix_summary": "Missing variable declaration - added int declaration"
     }
   }
 }
