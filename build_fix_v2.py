@@ -1030,7 +1030,7 @@ def main():
                                          api_key, endpoint, api_version, deployment_name)
         
         if not fixed_code:
-            print("  ✗ Auto-fix failed")
+            print("  ✗ Auto-fix LLM call failed")
             sys.exit(1)
         
         if READ_ONLY_MODE:
@@ -1043,10 +1043,26 @@ def main():
         print("  Verifying fix...")
         if verify_fix(source_file):
             print("  ✓ SUCCESS: Fix verified!")
-            commit_and_push(source_file, "Fix: Auto-fix compilation errors")
+            commit_and_push(source_file, "Fix: Auto-fix compilation errors (LEARNED_HIGH)")
         else:
-            print("  ✗ Fix verification failed")
-            sys.exit(1)
+            print("  ⚠️ Fix verification failed - falling back to PR creation")
+            print("  ℹ️ High-confidence fix didn't compile, creating PR for manual review...")
+            
+            # Fallback: Create PR instead of failing
+            root_causes = [err.root_cause for err in high_conf_errors]
+            error_messages = [err.error_message for err in high_conf_errors]
+            
+            pr_result = create_low_confidence_pr(
+                source_file, fixed_code, root_causes, error_messages,
+                api_key, endpoint, api_version, deployment_name
+            )
+            
+            if pr_result:
+                print("  ✓ Created PR for manual review due to verification failure")
+                sys.exit(0)  # Success - PR created as fallback
+            else:
+                print("  ✗ Failed to create fallback PR")
+                sys.exit(1)
 
 
 if __name__ == "__main__":
