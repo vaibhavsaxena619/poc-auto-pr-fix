@@ -1054,6 +1054,9 @@ def main():
             )
             
             if pr_result:
+                # Restore original file so Jenkins doesn't try to verify the bad fix
+                print("  ℹ️ Restoring original file...")
+                apply_fix(source_file, source_code)
                 print("  ✓ Created PR for manual review due to verification failure")
                 sys.exit(0)  # Success - PR created as fallback
             else:
