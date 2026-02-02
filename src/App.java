@@ -14,3 +14,8 @@ public class App {
         System.out.println(Const.VERSION);
     }
 }
+
+class Const {
+    public static String APP_NAME;
+    public static String VERSION;
+}
