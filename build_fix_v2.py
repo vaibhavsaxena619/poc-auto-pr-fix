@@ -271,7 +271,18 @@ def find_last_good_commit(source_file: str, max_search: int = 10) -> Tuple[str, 
     """
     print(f"  🔍 Searching commit history for last good commit (searching {max_search} commits back)...")
     
+    # Save current HEAD for cleanup
+    current_sha = None
+    stashed = False
+    
     try:
+        # Get current HEAD first
+        current_sha = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True,
+            text=True
+        ).stdout.strip()
+        
         # Get commit history
         result = subprocess.run(
             ['git', 'log', '--oneline', f'-{max_search}'],
@@ -285,11 +296,6 @@ def find_last_good_commit(source_file: str, max_search: int = 10) -> Tuple[str, 
             return (None, False)
         
         commits = result.stdout.strip().split('\n')
-        current_sha = subprocess.run(
-            ['git', 'rev-parse', 'HEAD'],
-            capture_output=True,
-            text=True
-        ).stdout.strip()
         
         for idx, commit_line in enumerate(commits):
             try:
@@ -302,8 +308,10 @@ def find_last_good_commit(source_file: str, max_search: int = 10) -> Tuple[str, 
                 
                 print(f"    Testing commit {idx}/{len(commits)}: {commit_sha} ({commit_msg[:40]}...)")
                 
-                # Stash current changes
-                subprocess.run(['git', 'stash'], capture_output=True, check=False)
+                # Stash current changes (only once)
+                if not stashed:
+                    subprocess.run(['git', 'stash'], capture_output=True, check=False)
+                    stashed = True
                 
                 # Checkout commit
                 checkout = subprocess.run(
@@ -327,9 +335,6 @@ def find_last_good_commit(source_file: str, max_search: int = 10) -> Tuple[str, 
                 
                 if compile_result.returncode == 0:
                     print(f"    ✅ Found good commit: {commit_sha} - Code compiles!")
-                    # Restore to current state
-                    subprocess.run(['git', 'checkout', current_sha], capture_output=True, check=False)
-                    subprocess.run(['git', 'stash', 'pop'], capture_output=True, check=False)
                     return (commit_sha, True)
                 else:
                     errors = compile_result.stderr.count("error:")
@@ -339,15 +344,22 @@ def find_last_good_commit(source_file: str, max_search: int = 10) -> Tuple[str, 
                 print(f"      Error testing {commit_sha[:7]}: {str(e)}")
                 continue
         
-        # Restore current state
-        subprocess.run(['git', 'checkout', current_sha], capture_output=True, check=False)
-        subprocess.run(['git', 'stash', 'pop'], capture_output=True, check=False)
-        
         print(f"    ℹ️ No fully good commit found in recent history")
         return (None, False)
         
     except Exception as e:
         print(f"  ⚠️ Could not search commit history: {str(e)}")
+        return (None, False)
+    
+    finally:
+        # Always restore to original state
+        if current_sha:
+            try:
+                subprocess.run(['git', 'checkout', current_sha], capture_output=True, check=False)
+                if stashed:
+                    subprocess.run(['git', 'stash', 'pop'], capture_output=True, check=False)
+            except Exception as e:
+                print(f"  ⚠️ Warning: Could not restore git state: {e}")
         return (None, False)
 
 
@@ -531,7 +543,7 @@ def send_to_azure_openai_with_retry(error_msg: str, source_code: str,
     # All retries failed
     print(f"\n  ❌ FAILED: All {max_retries} LLM API attempts failed")
     print(f"  📋 ISSUE SUMMARY:")
-    print(f"     - File: {source_code.split('\\n')[0] if source_code else 'unknown'}")
+    print(f"     - File: {source_code.split('\\n')[0] if source_code else 'unknown'}")  # Fixed: use actual newline
     print(f"     - Errors: {error_msg[:200]}...")
     print(f"     - Likely cause: API connectivity, rate limiting, or deployment configuration")
     print(f"     - Action required: Check Azure OpenAI service status and credentials")
