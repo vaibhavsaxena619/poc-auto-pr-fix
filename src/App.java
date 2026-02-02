@@ -9,5 +9,8 @@ public class App {
         
         int x = 5; // Fixed: declared variable
         System.out.println(x);
+
+        System.out.println(Const.APP_NAME);
+        System.out.println(Const.VERSION);
     }
 }
