@@ -483,8 +483,59 @@ CURRENT CODE:
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"ERROR: Azure OpenAI API failed: {e}")
-        return ""
+        print(f"⚠️ Azure OpenAI API error: {e}")
+        return None
+
+
+def send_to_azure_openai_with_retry(error_msg: str, source_code: str, 
+                                     api_key: str, endpoint: str, 
+                                     api_version: str, deployment_name: str,
+                                     max_retries: int = 3) -> str:
+    """
+    Wrapper for send_to_azure_openai with retry logic and better error reporting.
+    
+    Args:
+        error_msg: Compiler error message
+        source_code: Source file content
+        api_key: Azure OpenAI API key
+        endpoint: Azure OpenAI endpoint
+        api_version: API version
+        deployment_name: Deployment name
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        Fixed code from LLM, or None if all retries failed
+    """
+    import time
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            if attempt > 1:
+                wait_time = 2 ** (attempt - 1)  # Exponential backoff: 2, 4, 8 seconds
+                print(f"  ⏳ Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+            
+            print(f"  🔄 LLM API call attempt {attempt}/{max_retries}...")
+            result = send_to_azure_openai(error_msg, source_code, api_key, endpoint, 
+                                         api_version, deployment_name)
+            
+            if result:
+                print(f"  ✓ LLM responded successfully on attempt {attempt}")
+                return result
+            else:
+                print(f"  ⚠️ Attempt {attempt} returned empty response")
+                
+        except Exception as e:
+            print(f"  ✗ Attempt {attempt} failed: {e}")
+    
+    # All retries failed
+    print(f"\n  ❌ FAILED: All {max_retries} LLM API attempts failed")
+    print(f"  📋 ISSUE SUMMARY:")
+    print(f"     - File: {source_code.split('\\n')[0] if source_code else 'unknown'}")
+    print(f"     - Errors: {error_msg[:200]}...")
+    print(f"     - Likely cause: API connectivity, rate limiting, or deployment configuration")
+    print(f"     - Action required: Check Azure OpenAI service status and credentials")
+    return None
 
 
 def extract_fixed_code(llm_response: str) -> str:
@@ -1017,7 +1068,7 @@ def main():
             high_conf_error_msg = '\n'.join([e.error_msg for e in high_conf_errors])
             
             print("  Fixing high-confidence errors only...")
-            fixed_code_raw = send_to_azure_openai(high_conf_error_msg, source_code, 
+            fixed_code_raw = send_to_azure_openai_with_retry(high_conf_error_msg, source_code, 
                                              api_key, endpoint, api_version, deployment_name)
             
             if fixed_code_raw:
@@ -1062,7 +1113,7 @@ def main():
             error_msg_combined = '\n'.join([e.error_msg for e in low_conf_errors])
             
             print("  🤖 Calling LLM to generate fix suggestion...")
-            fixed_code_raw = send_to_azure_openai(error_msg_combined, source_code,
+            fixed_code_raw = send_to_azure_openai_with_retry(error_msg_combined, source_code,
                                              api_key, endpoint, api_version, deployment_name)
             
             if fixed_code_raw:
@@ -1113,7 +1164,7 @@ def main():
         print(f"  ✓ All errors are high-confidence - proceeding with auto-fix")
         
         source_code = read_source_file(source_file)
-        fixed_code_raw = send_to_azure_openai(error_msg, source_code, 
+        fixed_code_raw = send_to_azure_openai_with_retry(error_msg, source_code, 
                                          api_key, endpoint, api_version, deployment_name)
         
         if not fixed_code_raw:
