@@ -487,6 +487,89 @@ CURRENT CODE:
         return ""
 
 
+def extract_fixed_code(llm_response: str) -> str:
+    """
+    Extract only the code from LLM structured response.
+    
+    LLM returns:
+    ✅ FIXED FILE
+    [code here]
+    🛠 CHANGES MADE
+    [changes here]
+    🚫 UNRESOLVED
+    [unresolved items]
+    
+    We need to extract only the code between ✅ FIXED FILE and 🛠 CHANGES MADE.
+    """
+    try:
+        # Look for the FIXED FILE marker (with or without emoji)
+        fixed_file_markers = [
+            "✅ FIXED FILE\n",
+            "✅ FIXED FILE\r\n",
+            "FIXED FILE\n",
+            "FIXED FILE\r\n",
+        ]
+        
+        start_idx = -1
+        start_marker_len = 0
+        for marker in fixed_file_markers:
+            if marker in llm_response:
+                start_idx = llm_response.find(marker)
+                start_marker_len = len(marker)
+                break
+        
+        if start_idx == -1:
+            # Try without newline
+            for marker in ["✅ FIXED FILE", "FIXED FILE"]:
+                if marker in llm_response:
+                    start_idx = llm_response.find(marker)
+                    # Find the next newline after the marker
+                    next_newline = llm_response.find('\n', start_idx)
+                    if next_newline != -1:
+                        start_idx = next_newline + 1
+                        break
+        else:
+            start_idx += start_marker_len
+        
+        # Look for end markers
+        end_markers = [
+            "\n🛠 CHANGES MADE",
+            "\n🛠️ CHANGES MADE",
+            "\nCHANGES MADE",
+            "\n🚫 UNRESOLVED",
+            "\r\n🛠 CHANGES MADE",
+            "\r\n🛠️ CHANGES MADE",
+            "\r\nCHANGES MADE",
+            "\r\n🚫 UNRESOLVED",
+        ]
+        
+        end_idx = len(llm_response)
+        for marker in end_markers:
+            idx = llm_response.find(marker, start_idx if start_idx != -1 else 0)
+            if idx != -1 and idx > start_idx:
+                end_idx = idx
+                break
+        
+        if start_idx == -1:
+            # No markers found, return entire response (fallback)
+            print("  ⚠️ No structured markers found, using entire response")
+            return llm_response.strip()
+        
+        # Extract the code
+        code = llm_response[start_idx:end_idx].strip()
+        
+        # Remove trailing code block markers if present
+        if code.endswith('```'):
+            code = code[:-3].strip()
+        
+        print(f"  ℹ️ Extracted {len(code)} characters of code from {len(llm_response)} character response")
+        return code
+    
+    except Exception as e:
+        print(f"  ⚠️ Error extracting code: {e}, using original response")
+        return llm_response
+
+
 def apply_fix(source_file: str, fixed_code: str) -> bool:
     """Apply fixed code to source file."""
     try:
@@ -934,10 +1017,12 @@ def main():
             high_conf_error_msg = '\n'.join([e.error_msg for e in high_conf_errors])
             
             print("  Fixing high-confidence errors only...")
-            fixed_code = send_to_azure_openai(high_conf_error_msg, source_code, 
+            fixed_code_raw = send_to_azure_openai(high_conf_error_msg, source_code, 
                                              api_key, endpoint, api_version, deployment_name)
             
-            if fixed_code:
+            if fixed_code_raw:
+                # Extract just the code from structured response
+                fixed_code = extract_fixed_code(fixed_code_raw)
                 apply_fix(source_file, fixed_code)
                 
                 print("  Verifying high-confidence fixes...")
@@ -977,11 +1062,13 @@ def main():
             error_msg_combined = '\n'.join([e.error_msg for e in low_conf_errors])
             
             print("  🤖 Calling LLM to generate fix suggestion...")
-            fixed_code = send_to_azure_openai(error_msg_combined, source_code,
+            fixed_code_raw = send_to_azure_openai(error_msg_combined, source_code,
                                              api_key, endpoint, api_version, deployment_name)
             
-            if fixed_code:
+            if fixed_code_raw:
                 print("  ✅ LLM generated fix suggestion")
+                # Extract just the code from structured response
+                fixed_code = extract_fixed_code(fixed_code_raw)
                 apply_fix(source_file, fixed_code)
                 
                 # Create branch and PR with the fix
@@ -1026,12 +1113,15 @@ def main():
         print(f"  ✓ All errors are high-confidence - proceeding with auto-fix")
         
         source_code = read_source_file(source_file)
-        fixed_code = send_to_azure_openai(error_msg, source_code, 
+        fixed_code_raw = send_to_azure_openai(error_msg, source_code, 
                                          api_key, endpoint, api_version, deployment_name)
         
-        if not fixed_code:
+        if not fixed_code_raw:
             print("  ✗ Auto-fix LLM call failed")
             sys.exit(1)
+        
+        # Extract just the code from structured response
+        fixed_code = extract_fixed_code(fixed_code_raw)
         
         if READ_ONLY_MODE:
             print("  [READ-ONLY] Would apply fix")
